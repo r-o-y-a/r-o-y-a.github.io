@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        .flow-field {
+            font-family: monospace;
+            line-height: 1.2;
+        }
+        .arrow {
+            display: inline-block;
+            width: 0;
+            height: 0;
+            border-bottom-color: black;
+            transform-origin: center;
+        }
+        .form-group {
+            margin-bottom: 10px;
+        }
+        .form-group label {
+            display: inline-block;
+            width: 120px;
+            text-align: right;
+            margin-right: 10px;
+        }
+        .form-group input[type="number"], .form-group input[type="checkbox"] {
+            width: 80px;
+        }
+        .form-group button {
+            margin-left: 10px;
+        }
+        form label, a, button {
+            font-size: .8em;
+        }
+        button {
+            background-color:hotpink;
+            color: black;
+        }
+    </style>
+</head>
+<body>
+    <div class="form-group">
+        <form id="inputForm">
+            <label for="gridWidth">Grid Width:</label>
+            <input type="number" id="gridWidth" value="50">
+            <label for="gridHeight">Grid Height:</label>
+            <input type="number" id="gridHeight" value="50">
+            <label for="tilingEnabled">Tiling Enabled:</label>
+            <input type="checkbox" id="tilingEnabled">
+            <br>
+            <label for="scale">Scale:</label>
+            <input type="number" id="scale" step="0.01" min="0.01" max="1" value="0.04">
+            <label for="sine">Sine Multiplier:</label>
+            <input type="number" id="sine" value="4">
+            <label for="power">Power Exponent:</label>
+            <input type="number" id="power" value="1">
+            <br>
+            <label for="frequency">Frequency:</label>
+            <input type="number" id="frequency" step="0.1" value="2.4">
+            <label for="amplitude">Amplitude:</label>
+            <input type="number" id="amplitude" step="0.1" value="0.7">
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<button type="submit">generate!</button>
+            &nbsp;&nbsp;&nbsp;<a href="#" id="copyValues">copy all values</a>
+        </form>
+    </div>
+    <br />
+    <div id="flowField" class="flow-field"></div>
+
+    <script>
+        document.getElementById('inputForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            let gridWidth = parseInt(document.getElementById('gridWidth').value);
+            let gridHeight = parseInt(document.getElementById('gridHeight').value);
+            let scale = parseFloat(document.getElementById('scale').value);
+            let tilingEnabled = document.getElementById('tilingEnabled').checked;
+            let sine = parseFloat(document.getElementById('sine').value);
+            let power = parseFloat(document.getElementById('power').value);
+            let frequency = parseFloat(document.getElementById('frequency').value);
+            let amplitude = parseFloat(document.getElementById('amplitude').value);
+
+            // reinitialize permutation table on every submit to generate new grid with same values
+            const perm = [];
+            for (let i = 0; i < 256; i++) {
+                perm[i] = Math.floor(Math.random() * 256);
+            }
+            for (let i = 0; i < 256; i++) {
+                perm[256 + i] = perm[i];
+            }
+
+            let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, perm, frequency, amplitude);
+
+            flowField.print();
+        });
+
+        document.getElementById('copyValues').addEventListener('click', function(event) {
+            event.preventDefault();
+
+            let formValues = "";
+            let formElements = document.getElementById('inputForm').elements;
+
+            for (let i = 0; i < formElements.length; i++) {
+                let element = formElements[i];
+                if (element.tagName === 'INPUT' && (element.type === 'number' || element.type === 'checkbox')) {
+                    formValues += `${element.id}: ${element.value}\n`;
+                }
+            }
+
+            navigator.clipboard.writeText(formValues)
+                .then(() => console.log('form values copied to clipboard:', formValues))
+                .catch(err => console.error('failed to copy form values:', err));
+        });
+
+        class FlowField {
+            constructor(gridWidth, gridHeight, scale, tilingEnabled, sine, power, perm, frequency, amplitude) {
+                this.gridWidth = gridWidth;
+                this.gridHeight = gridHeight;
+                this.scale = scale;
+                this.tilingEnabled = tilingEnabled;
+                this.sine = sine;
+                this.power = power;
+                this.perm = perm;
+                this.frequency = frequency;
+                this.amplitude = amplitude;
+
+                this.grid = this.createGrid();
+            }
+
+            createGrid() {
+                let grid = [];
+
+                for (let y = 0; y < this.gridHeight; y++) {
+                    let row = [];
+
+                    for (let x = 0; x < this.gridWidth; x++) {
+                        const angle = this.tilingEnabled ? perlin(x * this.scale, y * this.scale, 50, this.frequency, this.amplitude, this.sine, this.power, this.perm) * Math.PI * 2
+                            : perlin(x * this.scale, y * this.scale, 0, this.frequency, this.amplitude, this.sine, this.power, this.perm) * Math.PI * 2;
+                        const intensity = this.tilingEnabled ? perlin(x * this.scale + 100, y * this.scale + 100, 50, this.frequency, this.amplitude, this.sine, this.power, this.perm)
+                            : perlin(x * this.scale + 100, y * this.scale + 100, 0, this.frequency, this.amplitude, this.sine, this.power, this.perm);
+
+                        row.push({ angle, intensity });
+                    }
+
+                    grid.push(row);
+                }
+
+                return grid;
+            }
+
+            getCell(x, y) {
+                if (x >= 0 && x < this.gridWidth && y >= 0 && y < this.gridHeight) {
+                    return this.grid[y][x];
+                } else {
+                    throw new Error("coordinates out of bounds");
+                }
+            }
+
+            printAscii() {
+                for (let y = 0; y < this.gridHeight; y++) {
+                    let rowStr = '';
+
+                    for (let x = 0; x < this.gridWidth; x++) {
+                        let cell = this.grid[y][x];
+                        rowStr += cell.angle.toFixed(1).padStart(6, ' ') + ' ';
+                    }
+
+                    console.log(rowStr);
+                }
+            }
+
+            print() {
+                console.log("printing grid values:");
+                this.printAscii();
+
+                let output = '';
+                for (let y = 0; y < this.gridHeight; y++) {
+                    let row = '';
+                    for (let x = 0; x < this.gridWidth; x++) {
+                        let cell = this.grid[y][x];
+                        row += this.angleToArrow(cell.angle, cell.intensity) + ' ';
+                    }
+                    output += row + '<br>';
+                }
+                document.getElementById('flowField').innerHTML = output;
+            }
+
+            angleToArrow(angle, intensity) {
+                let arrowElement = document.createElement('div');
+                arrowElement.innerHTML = "↑";
+                arrowElement.className = 'arrow';
+                arrowElement.style.transform = `rotate(${angle}rad)`;
+                arrowElement.style.color = `rgba(0, 0, 0, ${intensity})`;
+                return arrowElement.outerHTML;
+            }
+        }
+
+        // all the Perlin noise functions
+        function fade(t) {
+            return t * t * t * (t * (t * 6 - 15) + 10);
+        }
+
+        function lerp(t, a, b) {
+            return a + t * (b - a);
+        }
+
+        function grad(hash, x, y) {
+            const h = hash & 3;
+            const u = h < 2 ? x : y;
+            const v = h < 2 ? y : x;
+            return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+        }
+
+        function perlin(x, y, tileSize = 0, frequency = 1, amplitude = 1, sine = 1, power = 1, perm) {
+            x *= frequency;
+            y *= frequency;
+
+            const X = tileSize > 0 ? Math.floor(x) % tileSize : Math.floor(x) & 255;
+            const Y = tileSize > 0 ? Math.floor(y) % tileSize : Math.floor(y) & 255;
+
+            x = x - Math.floor(x);
+            y = y - Math.floor(y);
+
+            const u = fade(x);
+            const v = fade(y);
+
+            const A = perm[X] + Y;
+            const B = tileSize > 0 ? perm[(X + 1) % tileSize] + Y : perm[X + 1] + Y;
+
+            let noiseValue = 0;
+
+            if (tileSize > 0) {
+                noiseValue = lerp(v, lerp(u, grad(perm[A], x, y), grad(perm[B], x - 1, y)),
+                           lerp(u, grad(perm[(A + 1) % tileSize], x, y - 1), grad(perm[(B + 1) % tileSize], x - 1, y - 1)));
+            }
+            else {
+                noiseValue = lerp(v, lerp(u, grad(perm[A], x, y), grad(perm[B], x - 1, y)),
+                           lerp(u, grad(perm[A + 1], x, y - 1), grad(perm[B + 1], x - 1, y - 1)));
+            }
+
+            noiseValue = Math.sin(noiseValue * sine);
+            noiseValue = Math.pow(noiseValue, power);
+
+            // shift values to start at 0 to avoid negative, i.e., map from [-1, 1] to [0, 1]
+            noiseValue = (noiseValue + 1) / 2;
+
+            return amplitude * noiseValue;
+        }
+    </script>
+
+</body>
+</html>
