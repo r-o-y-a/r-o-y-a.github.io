@@ -56,10 +56,14 @@
             <br>
             <label for="frequency" title="Defines the frequency of the noise pattern.">Frequency:</label>
             <input type="number" id="frequency" step="0.1" value="2.4">
-            <label for="amplitude">Amplitude:</label>
+            <label for="amplitude" title="Controls the height of the noise peaks.">Amplitude:</label>
             <input type="number" id="amplitude" step="0.1" value="0.7">
-            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<button type="submit">generate!</button>
-            &nbsp;&nbsp;&nbsp;<a href="#" id="copyValues">copy all values</a>
+            <br>
+            <label for="gridValues" title="Paste the long string of grid values here.">Grid Values:</label>
+            <input type="text" id="gridValues">
+            <button type="submit">generate!</button>
+            <a href="#" id="copyValues">copy form values</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+            <a href="#" id="copyGridValues">copy grid values</a>
         </form>
     </div>
     <br />
@@ -69,27 +73,55 @@
         document.getElementById('inputForm').addEventListener('submit', function(event) {
             event.preventDefault();
 
-            let gridWidth = parseInt(document.getElementById('gridWidth').value);
-            let gridHeight = parseInt(document.getElementById('gridHeight').value);
-            let scale = parseFloat(document.getElementById('scale').value);
-            let tilingEnabled = document.getElementById('tilingEnabled').checked;
-            let sine = parseFloat(document.getElementById('sine').value);
-            let power = parseFloat(document.getElementById('power').value);
-            let frequency = parseFloat(document.getElementById('frequency').value);
-            let amplitude = parseFloat(document.getElementById('amplitude').value);
+            let gridValues = document.getElementById('gridValues').value;
+            let gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude;
 
-            // reinitialize permutation table on every submit to generate new grid with same values
-            const perm = [];
-            for (let i = 0; i < 256; i++) {
-                perm[i] = Math.floor(Math.random() * 256);
+            if (gridValues) {
+                let values = gridValues.split(',');
+                gridWidth = parseInt(values[0]);
+                gridHeight = parseInt(values[1]);
+                scale = parseFloat(values[2]);
+                tilingEnabled = values[3] === 'true';
+                sine = parseFloat(values[4]);
+                power = parseFloat(values[5]);
+                frequency = parseFloat(values[6]);
+                amplitude = parseFloat(values[7]);
+
+                let grid = [];
+                let index = 8;
+                for (let y = 0; y < gridHeight; y++) {
+                    let row = [];
+                    for (let x = 0; x < gridWidth; x++) {
+                        let angle = parseFloat(values[index++]);
+                        let intensity = parseFloat(values[index++]);
+                        row.push({ angle, intensity });
+                    }
+                    grid.push(row);
+                }
+
+                let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, [], frequency, amplitude, grid);
+                flowField.print();
+            } else {
+                gridWidth = parseInt(document.getElementById('gridWidth').value);
+                gridHeight = parseInt(document.getElementById('gridHeight').value);
+                scale = parseFloat(document.getElementById('scale').value);
+                tilingEnabled = document.getElementById('tilingEnabled').checked;
+                sine = parseFloat(document.getElementById('sine').value);
+                power = parseFloat(document.getElementById('power').value);
+                frequency = parseFloat(document.getElementById('frequency').value);
+                amplitude = parseFloat(document.getElementById('amplitude').value);
+
+                const perm = [];
+                for (let i = 0; i < 256; i++) {
+                    perm[i] = Math.floor(Math.random() * 256);
+                }
+                for (let i = 0; i < 256; i++) {
+                    perm[256 + i] = perm[i];
+                }
+
+                let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, perm, frequency, amplitude);
+                flowField.print();
             }
-            for (let i = 0; i < 256; i++) {
-                perm[256 + i] = perm[i];
-            }
-
-            let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, perm, frequency, amplitude);
-
-            flowField.print();
         });
 
         document.getElementById('copyValues').addEventListener('click', function(event) {
@@ -110,8 +142,18 @@
                 .catch(err => console.error('failed to copy form values:', err));
         });
 
+        document.getElementById('copyGridValues').addEventListener('click', function(event) {
+            event.preventDefault();
+
+            let flowFieldString = document.getElementById('flowField').dataset.gridString;
+
+            navigator.clipboard.writeText(flowFieldString)
+                .then(() => console.log('grid values copied to clipboard:', flowFieldString))
+                .catch(err => console.error('failed to copy grid values:', err));
+        });
+
         class FlowField {
-            constructor(gridWidth, gridHeight, scale, tilingEnabled, sine, power, perm, frequency, amplitude) {
+            constructor(gridWidth, gridHeight, scale, tilingEnabled, sine, power, perm, frequency, amplitude, grid = null) {
                 this.gridWidth = gridWidth;
                 this.gridHeight = gridHeight;
                 this.scale = scale;
@@ -122,7 +164,7 @@
                 this.frequency = frequency;
                 this.amplitude = amplitude;
 
-                this.grid = this.createGrid();
+                this.grid = grid || this.createGrid();
             }
 
             createGrid() {
@@ -172,15 +214,21 @@
                 this.printAscii();
 
                 let output = '';
+                let gridString = [this.gridWidth, this.gridHeight, this.scale, this.tilingEnabled, this.sine, this.power, this.frequency, this.amplitude];
+
                 for (let y = 0; y < this.gridHeight; y++) {
                     let row = '';
                     for (let x = 0; x < this.gridWidth; x++) {
                         let cell = this.grid[y][x];
                         row += this.angleToArrow(cell.angle, cell.intensity) + ' ';
+                        gridString.push(cell.angle);
+                        gridString.push(cell.intensity);
                     }
                     output += row + '<br>';
                 }
+
                 document.getElementById('flowField').innerHTML = output;
+                document.getElementById('flowField').dataset.gridString = gridString.join(',');
             }
 
             angleToArrow(angle, intensity) {
@@ -239,7 +287,6 @@
             noiseValue = Math.sin(noiseValue * sine);
             noiseValue = Math.pow(noiseValue, power);
 
-            // shift values to start at 0 to avoid negative, i.e., map from [-1, 1] to [0, 1]
             noiseValue = (noiseValue + 1) / 2;
 
             return amplitude * noiseValue;
