@@ -32,7 +32,7 @@
             font-size: .8em;
         }
         button {
-            background-color:hotpink;
+            background-color: hotpink;
             color: black;
         }
     </style>
@@ -202,7 +202,17 @@
 
                     for (let x = 0; x < this.gridWidth; x++) {
                         let cell = this.grid[y][x];
-                        rowStr += cell.angle.toFixed(1).padStart(6, ' ') + ' ';
+
+                        // vx, vy (velocity) can be negative number because it is a vector quantity (has both magnitude and direction)
+                        // negative value indicates velocity in that direction is opposite to positive axis direction (standard representation of vector quanitites)
+                        let vx = cell.intensity * Math.cos(cell.angle);
+                        let vy = cell.intensity * Math.sin(cell.angle);
+
+                        let flowInfo = this.getSurroundingFlowInfo(x, y);
+                        let averageAlignment = flowInfo.alignment.toFixed(2);
+
+                        // output angle, velocity x, velocity y, average alignment with surrounding cells
+                        rowStr += `(${cell.angle.toFixed(1)}, ${vx.toFixed(2)}, ${vy.toFixed(2)}, ${averageAlignment}) `;
                     }
 
                     console.log(rowStr);
@@ -220,7 +230,10 @@
                     let row = '';
                     for (let x = 0; x < this.gridWidth; x++) {
                         let cell = this.grid[y][x];
-                        row += this.angleToArrow(cell.angle, cell.intensity) + ' ';
+                        let flowInfo = this.getSurroundingFlowInfo(x, y);
+                        let averageAlignment = flowInfo.alignment.toFixed(2);
+
+                        row += this.angleToArrow(cell.angle, cell.intensity, averageAlignment) + ' ';
                         gridString.push(cell.angle);
                         gridString.push(cell.intensity);
                     }
@@ -231,13 +244,76 @@
                 document.getElementById('flowField').dataset.gridString = gridString.join(',');
             }
 
-            angleToArrow(angle, intensity) {
+            angleToArrow(angle, intensity, averageAlignment) {
                 let arrowElement = document.createElement('div');
                 arrowElement.innerHTML = "↑";
                 arrowElement.className = 'arrow';
                 arrowElement.style.transform = `rotate(${angle}rad)`;
                 arrowElement.style.color = `rgba(0, 0, 0, ${intensity})`;
+                arrowElement.title = `Average Alignment: ${averageAlignment}`;
                 return arrowElement.outerHTML;
+            }
+
+            // calculates information about surrounding flow vectors relative to a given cell coordinates on the grid
+            // returns surrounding cells and alignment average
+            // alignmentAverage close to 1 = flow directions of the surrounding cells are closely aligned with the flow direction of the central cell. suggests a high degree of coherence or uniformity in flow direction in the local vicinity
+            // alignmentAverage close to -1 = flow directions of the surrounding cells are mostly opposite to the flow direction of the central cell. suggests a lack of coherence or consistency in flow direction
+            // alignmentAverage around 0 =  implies that there is no significant alignment or coherence among the flow directions of the neighboring cells relative to the central cell
+            getSurroundingFlowInfo(x, y) {
+
+                // relative coordinates (offsets) of neighboring cells around the current cell, covering 8 possible directions (N, NE, E, SE, S, SW, W, NW)
+                const surroundingOffsets = [
+                    {dx: -1, dy: -1}, {dx: 0, dy: -1}, {dx: 1, dy: -1},
+                    {dx: -1, dy: 0},                  {dx: 1, dy: 0},
+                    {dx: -1, dy: 1},  {dx: 0, dy: 1},  {dx: 1, dy: 1}
+                ];
+
+                // get current cell's flow vector using angle and intensity
+                const pointCell = this.getCell(x, y);
+                const pointVx = pointCell.intensity * Math.cos(pointCell.angle);
+                const pointVy = pointCell.intensity * Math.sin(pointCell.angle);
+                
+                let alignmentSum = 0;
+                let surroundingCells = [];
+
+                for (const offset of surroundingOffsets) {
+                    const nx = x + offset.dx;
+                    const ny = y + offset.dy;
+
+                    // for each neighboring cell, get the angle & intensity and compute vector components
+                    if (nx >= 0 && nx < this.gridWidth && ny >= 0 && ny < this.gridHeight) {
+                        const surroundingCell = this.getCell(nx, ny);
+                        const surroundingVx = surroundingCell.intensity * Math.cos(surroundingCell.angle);
+                        const surroundingVy = surroundingCell.intensity * Math.sin(surroundingCell.angle);
+
+                        surroundingCells.push({
+                            x: nx,
+                            y: ny,
+                            vx: surroundingVx,
+                            vy: surroundingVy
+                        });
+
+                        // calculate dot product between given cell and surrouding cells flow vectors
+                        const dotProduct = pointVx * surroundingVx + pointVy * surroundingVy;
+
+                        // calculate magnitude (length) of the vectors involved
+                        const magnitudeProduct = Math.sqrt(pointVx**2 + pointVy**2) * Math.sqrt(surroundingVx**2 + surroundingVy**2);
+                        
+                        // ensure magnitude product is greater than 0 to avoid division by zero errors
+                        if (magnitudeProduct > 0) {
+                            alignmentSum += dotProduct / magnitudeProduct;
+                        }
+                    }
+                }
+
+                // sum the alignment values computed for all valid neighboring cells and 
+                // divide by the number of neighboring cells to get the average alignment
+                const alignmentAverage = alignmentSum / surroundingCells.length;
+
+                return {
+                    surroundingCells: surroundingCells,
+                    alignment: alignmentAverage
+                };
             }
         }
 
