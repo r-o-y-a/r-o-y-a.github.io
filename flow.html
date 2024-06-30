@@ -94,13 +94,16 @@
                     for (let x = 0; x < gridWidth; x++) {
                         let angle = parseFloat(values[index++]);
                         let intensity = parseFloat(values[index++]);
-                        row.push({ angle, intensity });
+                        let averageAlignment = parseFloat(values[index++]);
+                        let vx = parseFloat(values[index++]);
+                        let vy = parseFloat(values[index++]);
+                        row.push({ angle, intensity, averageAlignment, vx, vy });
                     }
                     grid.push(row);
                 }
 
-                let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, [], frequency, amplitude, grid);
-                flowField.print();
+                let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, grid);
+                flowField.displayOnWeb();
             } else {
                 gridWidth = parseInt(document.getElementById('gridWidth').value);
                 gridHeight = parseInt(document.getElementById('gridHeight').value);
@@ -111,16 +114,8 @@
                 frequency = parseFloat(document.getElementById('frequency').value);
                 amplitude = parseFloat(document.getElementById('amplitude').value);
 
-                const perm = [];
-                for (let i = 0; i < 256; i++) {
-                    perm[i] = Math.floor(Math.random() * 256);
-                }
-                for (let i = 0; i < 256; i++) {
-                    perm[256 + i] = perm[i];
-                }
-
-                let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, perm, frequency, amplitude);
-                flowField.print();
+                let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude);
+                flowField.displayOnWeb();
             }
         });
 
@@ -152,77 +147,83 @@
                 .catch(err => console.error('failed to copy grid values:', err));
         });
 
-        class FlowField {
-            constructor(gridWidth, gridHeight, scale, tilingEnabled, sine, power, perm, frequency, amplitude, grid = null) {
+        class FlowField {            
+            constructor(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, grid = null) {
                 this.gridWidth = gridWidth;
                 this.gridHeight = gridHeight;
                 this.scale = scale;
                 this.tilingEnabled = tilingEnabled;
                 this.sine = sine;
                 this.power = power;
-                this.perm = perm;
                 this.frequency = frequency;
                 this.amplitude = amplitude;
 
                 this.grid = grid || this.createGrid();
             }
 
+            static generatePerlinPermutationTable() {
+                // permutation table that is used to produce a pseudo-random sequence of gradient vectors for perlin noise
+                const perm = [];
+                for (let i = 0; i < 256; i++) {
+                    perm[i] = Math.floor(Math.random() * 256);
+                }
+                for (let i = 0; i < 256; i++) {
+                    perm[256 + i] = perm[i];
+                }
+                return perm;
+            }
+
             createGrid() {
                 let grid = [];
+                let perm = FlowField.generatePerlinPermutationTable();
 
                 for (let y = 0; y < this.gridHeight; y++) {
                     let row = [];
 
                     for (let x = 0; x < this.gridWidth; x++) {
-                        const angle = this.tilingEnabled ? perlin(x * this.scale, y * this.scale, 50, this.frequency, this.amplitude, this.sine, this.power, this.perm) * Math.PI * 2
-                            : perlin(x * this.scale, y * this.scale, 0, this.frequency, this.amplitude, this.sine, this.power, this.perm) * Math.PI * 2;
-                        const intensity = this.tilingEnabled ? perlin(x * this.scale + 100, y * this.scale + 100, 50, this.frequency, this.amplitude, this.sine, this.power, this.perm)
-                            : perlin(x * this.scale + 100, y * this.scale + 100, 0, this.frequency, this.amplitude, this.sine, this.power, this.perm);
 
-                        row.push({ angle, intensity });
+                        const angle = this.tilingEnabled ? perlin(x * this.scale, y * this.scale, 50, this.frequency, this.amplitude, this.sine, this.power, perm) * Math.PI * 2
+                            : perlin(x * this.scale, y * this.scale, 0, this.frequency, this.amplitude, this.sine, this.power, perm) * Math.PI * 2;
+                        const intensity = this.tilingEnabled ? perlin(x * this.scale + 100, y * this.scale + 100, 50, this.frequency, this.amplitude, this.sine, this.power, perm)
+                            : perlin(x * this.scale + 100, y * this.scale + 100, 0, this.frequency, this.amplitude, this.sine, this.power, perm);
+
+                        // vx, vy (velocity) can be negative number because it is a vector quantity (has both magnitude and direction)
+                        // negative value indicates velocity in that direction is opposite to positive axis direction (standard representation of vector quanitites)
+                        const vx = intensity * Math.cos(angle).toFixed(2);
+                        const vy = intensity * Math.sin(angle).toFixed(2);
+
+                        row.push({ angle, intensity, vx, vy });
                     }
 
                     grid.push(row);
                 }
 
-                return grid;
+                this.grid = grid;
+
+                this.addAlignmentInfo();
+
+                // this is the ultimate final dataset returned
+                console.log(this.grid);
+
+                return this.grid;
             }
 
-            getCell(x, y) {
-                if (x >= 0 && x < this.gridWidth && y >= 0 && y < this.gridHeight) {
-                    return this.grid[y][x];
-                } else {
-                    throw new Error("coordinates out of bounds");
-                }
-            }
-
-            printAscii() {
+            
+            addAlignmentInfo() {
                 for (let y = 0; y < this.gridHeight; y++) {
-                    let rowStr = '';
-
                     for (let x = 0; x < this.gridWidth; x++) {
                         let cell = this.grid[y][x];
-
-                        // vx, vy (velocity) can be negative number because it is a vector quantity (has both magnitude and direction)
-                        // negative value indicates velocity in that direction is opposite to positive axis direction (standard representation of vector quanitites)
-                        let vx = cell.intensity * Math.cos(cell.angle);
-                        let vy = cell.intensity * Math.sin(cell.angle);
 
                         let flowInfo = this.getSurroundingFlowInfo(x, y);
                         let averageAlignment = flowInfo.alignment.toFixed(2);
 
-                        // output angle, velocity x, velocity y, average alignment with surrounding cells
-                        rowStr += `(${cell.angle.toFixed(1)}, ${vx.toFixed(2)}, ${vy.toFixed(2)}, ${averageAlignment}) `;
+                        cell.averageAlignment = averageAlignment;
                     }
-
-                    console.log(rowStr);
                 }
             }
+            
 
-            print() {
-                console.log("printing grid values:");
-                this.printAscii();
-
+            displayOnWeb() {
                 let output = '';
                 let gridString = [this.gridWidth, this.gridHeight, this.scale, this.tilingEnabled, this.sine, this.power, this.frequency, this.amplitude];
 
@@ -230,12 +231,13 @@
                     let row = '';
                     for (let x = 0; x < this.gridWidth; x++) {
                         let cell = this.grid[y][x];
-                        let flowInfo = this.getSurroundingFlowInfo(x, y);
-                        let averageAlignment = flowInfo.alignment.toFixed(2);
 
-                        row += this.angleToArrow(cell.angle, cell.intensity, averageAlignment) + ' ';
+                        row += this.angleToArrow(cell.angle, cell.intensity, cell.averageAlignment, cell.vx, cell.vy) + ' ';
                         gridString.push(cell.angle);
                         gridString.push(cell.intensity);
+                        gridString.push(cell.averageAlignment);
+                        gridString.push(cell.vx);
+                        gridString.push(cell.vy);
                     }
                     output += row + '<br>';
                 }
@@ -252,6 +254,14 @@
                 arrowElement.style.color = `rgba(0, 0, 0, ${intensity})`;
                 arrowElement.title = `Average Alignment: ${averageAlignment}`;
                 return arrowElement.outerHTML;
+            }
+
+            getCell(x, y) {
+                if (x >= 0 && x < this.gridWidth && y >= 0 && y < this.gridHeight) {
+                    return this.grid[y][x];
+                } else {
+                    throw new Error("coordinates out of bounds");
+                }
             }
 
             // calculates information about surrounding flow vectors relative to a given cell coordinates on the grid
