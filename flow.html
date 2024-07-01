@@ -124,8 +124,6 @@
                 const randomCell = getRandomCellWithHighAlignment(flowField.grid);
                 if (randomCell) {
                     path = createPathFromCell(flowField.grid, randomCell.x, randomCell.y);
-                    console.log('Random starting cell:', randomCell);
-                    console.log('Path to edge:', path);
                 } else {
                     console.log('No cell with average alignment > 0.80 found.');
                 }
@@ -529,6 +527,8 @@
                 path.push({ x: currentX, y: currentY, direction: chosenDirection.name, averageAlignment: currentCell.averageAlignment, intensity: currentCell.intensity, angle: chosenDirection.angle });
             }
 
+            // final path returned with all data (angle, averageAlignment, direction, intensity, x, y)
+            console.log(path);
             return path;
         }
         //#endregion
