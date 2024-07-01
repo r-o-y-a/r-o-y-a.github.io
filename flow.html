@@ -53,7 +53,7 @@
             <label for="gridWidth">Grid Width:</label>
             <input type="number" id="gridWidth" value="50">
             <label for="gridHeight">Grid Height:</label>
-            <input type="number" id="gridHeight" value="50">
+            <input type="number" id="gridHeight" value="30">
             <label for="tilingEnabled" title="Enables seamless tiling of the pattern.">Tiling Enabled:</label>
             <input type="checkbox" id="tilingEnabled">
             <br>
@@ -270,7 +270,7 @@
 
                 this.addAlignmentInfo();
 
-                // this is the ultimate final dataset returned
+                // this is the ultimate final grid dataset returned
                 console.log(this.grid);
 
                 return this.grid;
@@ -469,7 +469,7 @@
 
         // create a path from a cell to the edge of the grid
         function createPathFromCell(grid, startX, startY) {
-            const path = [{ x: startX, y: startY }];
+            const path = [];
             let currentX = startX;
             let currentY = startY;
 
@@ -519,10 +519,14 @@
                     break;
                 }
 
+                if (currentX == startX && currentY == startY) {
+                    path.push({ x: startX, y: startY, direction: chosenDirection.name, averageAlignment: currentCell.averageAlignment, intensity: currentCell.intensity, angle: chosenDirection.angle });
+                }
+                
                 // move to next cell
                 currentX = nextX;
                 currentY = nextY;
-                path.push({ x: currentX, y: currentY });
+                path.push({ x: currentX, y: currentY, direction: chosenDirection.name, averageAlignment: currentCell.averageAlignment, intensity: currentCell.intensity, angle: chosenDirection.angle });
             }
 
             return path;
