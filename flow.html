@@ -69,6 +69,8 @@
             <label for="amplitude" title="Controls the height of the noise peaks.">Amplitude:</label>
             <input type="number" id="amplitude" step="0.1" value="0.7">
             <br>
+            <label for="startPoint" title="Enter the starting point for the path as x,y">Start Point:</label>
+            <input type="text" id="startPoint" placeholder="x,y">    
             <label for="gridValues" title="Paste the long string of grid values here.">Grid Values:</label>
             <input type="text" id="gridValues">
             <button type="submit">generate!</button>
@@ -112,15 +114,23 @@
             let gridValues = document.getElementById('flowField').dataset.gridString;
             let flowField = createFlowFieldFromCurrentlyDisplayedGrid(gridValues);
 
-            const randomCell = getRandomCellWithHighAlignment(flowField.grid);
-            if (randomCell) {
-                const path = createPathFromCell(flowField.grid, randomCell.x, randomCell.y);
-                console.log('Random starting cell:', randomCell);
-                console.log('Path to edge:', path);
-                colorPath(path);
+            let startPoint = document.getElementById('startPoint').value;
+            let path;
+            if (startPoint) {
+                let [startX, startY] = startPoint.split(',').map(Number);
+                path = createPathFromCell(flowField.grid, startX, startY);
             } else {
-                console.log('No cell with average alignment > 0.80 found.');
+
+                const randomCell = getRandomCellWithHighAlignment(flowField.grid);
+                if (randomCell) {
+                    path = createPathFromCell(flowField.grid, randomCell.x, randomCell.y);
+                    console.log('Random starting cell:', randomCell);
+                    console.log('Path to edge:', path);
+                } else {
+                    console.log('No cell with average alignment > 0.80 found.');
+                }
             }
+            colorPath(path);
         });     
 
         function colorPath(path) {
@@ -139,6 +149,7 @@
                 if (matchingDiv) {
                     if (index === 0) {
                         matchingDiv.classList.add('start-point');
+                        matchingDiv.title = "START POINT: " + x + ', ' + y;
                     } else {
                         matchingDiv.classList.add('highlighted');
                     }
