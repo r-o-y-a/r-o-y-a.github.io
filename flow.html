@@ -35,6 +35,16 @@
             background-color: hotpink;
             color: black;
         }
+        .highlighted {
+            color: red !important; 
+            font-weight: bold;
+            font-size: 1em;
+        }
+        .start-point {
+            color: green !important; 
+            font-weight: bolder;
+            font-size: 1.9em;
+        }
     </style>
 </head>
 <body>
@@ -64,6 +74,8 @@
             <button type="submit">generate!</button>
             <a href="#" id="copyValues">copy form values</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
             <a href="#" id="copyGridValues">copy grid values</a>
+            <br />
+            <a href ="#" id="drawPath">draw path</a>
         </form>
     </div>
     <br />
@@ -77,32 +89,7 @@
             let gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude;
 
             if (gridValues) {
-                let values = gridValues.split(',');
-                gridWidth = parseInt(values[0]);
-                gridHeight = parseInt(values[1]);
-                scale = parseFloat(values[2]);
-                tilingEnabled = values[3] === 'true';
-                sine = parseFloat(values[4]);
-                power = parseFloat(values[5]);
-                frequency = parseFloat(values[6]);
-                amplitude = parseFloat(values[7]);
-
-                let grid = [];
-                let index = 8;
-                for (let y = 0; y < gridHeight; y++) {
-                    let row = [];
-                    for (let x = 0; x < gridWidth; x++) {
-                        let angle = parseFloat(values[index++]);
-                        let intensity = parseFloat(values[index++]);
-                        let averageAlignment = parseFloat(values[index++]);
-                        let vx = parseFloat(values[index++]);
-                        let vy = parseFloat(values[index++]);
-                        row.push({ angle, intensity, averageAlignment, vx, vy });
-                    }
-                    grid.push(row);
-                }
-
-                let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, grid);
+                let flowField = createFlowFieldFromCurrentlyDisplayedGrid(gridValues);
                 flowField.displayOnWeb();
             } else {
                 gridWidth = parseInt(document.getElementById('gridWidth').value);
@@ -118,6 +105,46 @@
                 flowField.displayOnWeb();
             }
         });
+
+        document.getElementById('drawPath').addEventListener('click', function(event) {
+            event.preventDefault();
+
+            let gridValues = document.getElementById('flowField').dataset.gridString;
+            let flowField = createFlowFieldFromCurrentlyDisplayedGrid(gridValues);
+
+            const randomCell = getRandomCellWithHighAlignment(flowField.grid);
+            if (randomCell) {
+                const path = createPathFromCell(flowField.grid, randomCell.x, randomCell.y);
+                console.log('Random starting cell:', randomCell);
+                console.log('Path to edge:', path);
+                colorPath(path);
+            } else {
+                console.log('No cell with average alignment > 0.80 found.');
+            }
+        });     
+
+        function colorPath(path) {
+            // clear previous highlights
+            document.querySelectorAll('.arrow.highlighted').forEach(el => el.classList.remove('highlighted'));
+            document.querySelectorAll('.arrow.start-point').forEach(el => el.classList.remove('start-point'));
+
+            path.forEach((cell, index) => {
+                let x = cell.x;
+                let y = cell.y;
+                let matchingDiv = Array.from(document.querySelectorAll('.arrow')).find(div => {
+                    let titleParts = div.title.split(',');
+                    return titleParts.length === 3 && parseInt(titleParts[1]) === x && parseInt(titleParts[2]) === y;
+                });
+
+                if (matchingDiv) {
+                    if (index === 0) {
+                        matchingDiv.classList.add('start-point');
+                    } else {
+                        matchingDiv.classList.add('highlighted');
+                    }
+                }
+            });
+        }
 
         document.getElementById('copyValues').addEventListener('click', function(event) {
             event.preventDefault();
@@ -146,6 +173,36 @@
                 .then(() => console.log('grid values copied to clipboard:', flowFieldString))
                 .catch(err => console.error('failed to copy grid values:', err));
         });
+
+        function createFlowFieldFromCurrentlyDisplayedGrid(gridValues) {
+            let values = gridValues.split(',');
+            gridWidth = parseInt(values[0]);
+            gridHeight = parseInt(values[1]);
+            scale = parseFloat(values[2]);
+            tilingEnabled = values[3] === 'true';
+            sine = parseFloat(values[4]);
+            power = parseFloat(values[5]);
+            frequency = parseFloat(values[6]);
+            amplitude = parseFloat(values[7]);
+
+            let grid = [];
+            let index = 8;
+            for (let y = 0; y < gridHeight; y++) {
+                let row = [];
+                for (let x = 0; x < gridWidth; x++) {
+                    let angle = parseFloat(values[index++]);
+                    let intensity = parseFloat(values[index++]);
+                    let averageAlignment = parseFloat(values[index++]);
+                    let vx = parseFloat(values[index++]);
+                    let vy = parseFloat(values[index++]);
+                    row.push({ angle, intensity, averageAlignment, vx, vy });
+                }
+                grid.push(row);
+            }
+
+            let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, grid);
+            return flowField;
+        }
 
         class FlowField {            
             constructor(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, grid = null) {
@@ -232,7 +289,7 @@
                     for (let x = 0; x < this.gridWidth; x++) {
                         let cell = this.grid[y][x];
 
-                        row += this.angleToArrow(cell.angle, cell.intensity, cell.averageAlignment, cell.vx, cell.vy) + ' ';
+                        row += this.angleToArrow(cell.angle, cell.intensity, cell.averageAlignment, cell.vx, cell.vy, x, y) + ' ';
                         gridString.push(cell.angle);
                         gridString.push(cell.intensity);
                         gridString.push(cell.averageAlignment);
@@ -246,13 +303,13 @@
                 document.getElementById('flowField').dataset.gridString = gridString.join(',');
             }
 
-            angleToArrow(angle, intensity, averageAlignment) {
+            angleToArrow(angle, intensity, averageAlignment, vx, vy, x, y) {
                 let arrowElement = document.createElement('div');
                 arrowElement.innerHTML = "↑";
                 arrowElement.className = 'arrow';
                 arrowElement.style.transform = `rotate(${angle}rad)`;
                 arrowElement.style.color = `rgba(0, 0, 0, ${intensity})`;
-                arrowElement.title = `Average Alignment: ${averageAlignment}`;
+                arrowElement.title = `${averageAlignment},${x},${y}`;
                 return arrowElement.outerHTML;
             }
 
@@ -327,7 +384,7 @@
             }
         }
 
-        // all the Perlin noise functions
+        //#region all the Perlin noise functions
         function fade(t) {
             return t * t * t * (t * (t * 6 - 15) + 10);
         }
@@ -377,6 +434,89 @@
 
             return amplitude * noiseValue;
         }
+        //#endregion
+
+        //#region create path
+        function getRandomCellWithHighAlignment(grid) {
+            const highAlignmentCells = [];
+            for (let y = 0; y < grid.length; y++) {
+                for (let x = 0; x < grid[y].length; x++) {
+                    // find a random cell with averageAlignment > 0.80
+                    if (grid[y][x].averageAlignment > 0.80) {
+                        highAlignmentCells.push({ x, y });
+                    }
+                }
+            }
+            if (highAlignmentCells.length === 0) {
+                return null;
+            }
+
+            // temp for creating static path for debugging
+            //return highAlignmentCells[Math.floor(7)];
+            return highAlignmentCells[Math.floor(Math.random() * highAlignmentCells.length)];
+        }
+
+        // create a path from a cell to the edge of the grid
+        function createPathFromCell(grid, startX, startY) {
+            const path = [{ x: startX, y: startY }];
+            let currentX = startX;
+            let currentY = startY;
+
+            // map directions to angle (0 = N) and offset (dx, dy) to identify surrounding cell positions
+            const directions = [
+                { name: 'N', dx: 0, dy: -1, angle: 0 },                    // N (0 degrees)
+                { name: 'NE', dx: 1, dy: -1, angle: Math.PI / 4 },         // NE (45 degrees)
+                { name: 'E', dx: 1, dy: 0, angle: Math.PI / 2 },           // E (90 degrees)
+                { name: 'SE', dx: 1, dy: 1, angle: 3 * Math.PI / 4 },      // SE (135 degrees)
+                { name: 'S', dx: 0, dy: 1, angle: Math.PI },               // S (180 degrees)
+                { name: 'SW', dx: -1, dy: 1, angle: 5 * Math.PI / 4 },     // SW (225 degrees)
+                { name: 'W', dx: -1, dy: 0, angle: 3 * Math.PI / 2 },      // W (270 degrees)
+                { name: 'NW', dx: -1, dy: -1, angle: 7 * Math.PI / 4 }     // NW (315 degrees)
+            ];
+
+            while (true) {
+                const currentCell = grid[currentY][currentX];
+                const angle = currentCell.angle;
+
+                // normalize angle to be within [0, 2 * Math.PI]
+                const normalizedAngle = angle % (2 * Math.PI);
+                
+                // map cell angle to one of 8 directions
+                let minDifference = Infinity;
+                let chosenDirection = null;
+
+                for (const direction of directions) {
+                    let difference = Math.abs(normalizedAngle - direction.angle);
+                    // account for the 360
+                    if (difference > Math.PI) {
+                        difference = 2 * Math.PI - difference;
+                    }
+                    if (difference < minDifference) {
+                        minDifference = difference;
+                        chosenDirection = direction;
+                    }
+                }
+
+                if (!chosenDirection) break;
+
+                // calculate next cell coordinates based on chosen direction of current cell using direction offset (dx, dy)
+                const nextX = currentX + chosenDirection.dx;
+                const nextY = currentY + chosenDirection.dy;
+
+                // break if next cell is outside grid boundaries
+                if (nextX < 0 || nextX >= grid[0].length || nextY < 0 || nextY >= grid.length) {
+                    break;
+                }
+
+                // move to next cell
+                currentX = nextX;
+                currentY = nextY;
+                path.push({ x: currentX, y: currentY });
+            }
+
+            return path;
+        }
+        //#endregion
     </script>
 
 </body>
