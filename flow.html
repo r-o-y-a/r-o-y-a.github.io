@@ -13,6 +13,14 @@
             border-bottom-color: black;
             transform-origin: center;
         }
+        .arrow-gravityZone {
+            display: inline-block;
+            width: 0;
+            height: 0;
+            border-bottom-color: black;
+            transform-origin: center;
+            color: blue !important;
+        }
         .form-group {
             margin-bottom: 10px;
         }
@@ -266,6 +274,7 @@
 
                 this.grid = grid;
 
+                this.createGravityZones();
                 this.addAlignmentInfo();
 
                 // this is the ultimate final grid dataset returned
@@ -274,7 +283,31 @@
                 return this.grid;
             }
 
-            
+            createGravityZones() {
+                const zoneWidth = 10;
+                const zoneHeight = 5;
+                
+                // clear existing gravity zones
+                this.grid.forEach(row => row.forEach(cell => cell.isGravityZone = false));
+
+                // get a random integer between min (inclusive) and max (exclusive)
+                const getRandomInt = (min, max) => Math.floor(Math.random() * (max - min)) + min;
+
+                // create 8 random gravity zones
+                for (let i = 0; i < 8; i++) {
+                    // generate random top-left corner for the zone
+                    const x = getRandomInt(0, this.gridWidth - zoneWidth + 1);
+                    const y = getRandomInt(0, this.gridHeight - zoneHeight + 1);
+
+                    // update grid to mark the cells in the zone as gravity zones
+                    for (let row = y; row < y + zoneHeight; row++) {
+                        for (let col = x; col < x + zoneWidth; col++) {
+                            this.grid[row][col].isGravityZone = true;
+                        }
+                    }
+                }
+            }
+
             addAlignmentInfo() {
                 for (let y = 0; y < this.gridHeight; y++) {
                     for (let x = 0; x < this.gridWidth; x++) {
@@ -297,8 +330,14 @@
                     let row = '';
                     for (let x = 0; x < this.gridWidth; x++) {
                         let cell = this.grid[y][x];
+                        let cellContent = this.angleToArrow(cell.angle, cell.intensity, cell.averageAlignment, cell.vx, cell.vy, x, y);
 
-                        row += this.angleToArrow(cell.angle, cell.intensity, cell.averageAlignment, cell.vx, cell.vy, x, y) + ' ';
+                        if (cell.isGravityZone) {
+                            cellContent = cellContent.replace('class="arrow"', 'class="arrow-gravityZone"');
+                        }
+
+                        row += `${cellContent} `;
+
                         gridString.push(cell.angle);
                         gridString.push(cell.intensity);
                         gridString.push(cell.averageAlignment);
