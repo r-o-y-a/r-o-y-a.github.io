@@ -79,7 +79,7 @@
             <br>
             <label for="startPoint" title="Enter the starting point for the path as x,y">Path Start Point:</label>
             <input type="text" id="startPoint" placeholder="x,y">    
-            <label for="gridValues" title="Paste the long string of grid values here.">Grid Values:</label>
+            <label for="gridValues" title="Paste the long string of grid values here.">Grid Values & Perm:</label>
             <input type="text" id="gridValues">
             <button type="submit">generate!</button>
             <a href="#" id="copyValues">copy form values</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
@@ -96,11 +96,20 @@
             event.preventDefault();
 
             let gridValues = document.getElementById('gridValues').value;
-            let gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude;
+            let gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, perm;
 
             if (gridValues) {
-                let flowField = createFlowFieldFromCurrentlyDisplayedGrid(gridValues);
-                flowField.displayOnWeb();
+                let values = gridValues.split(',');
+                gridWidth = parseInt(values[0]);
+                gridHeight = parseInt(values[1]);
+                scale = parseFloat(values[2]);
+                tilingEnabled = values[3] === 'true';
+                sine = parseFloat(values[4]);
+                power = parseFloat(values[5]);
+                frequency = parseFloat(values[6]);
+                amplitude = parseFloat(values[7]);
+                perm = values[8];
+               
             } else {
                 gridWidth = parseInt(document.getElementById('gridWidth').value);
                 gridHeight = parseInt(document.getElementById('gridHeight').value);
@@ -110,10 +119,11 @@
                 power = parseFloat(document.getElementById('power').value);
                 frequency = parseFloat(document.getElementById('frequency').value);
                 amplitude = parseFloat(document.getElementById('amplitude').value);
-
-                let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude);
-                flowField.displayOnWeb();
+                perm = null;
             }
+
+            let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, perm);
+            flowField.displayOnWeb();
         });
 
         document.getElementById('drawPath').addEventListener('click', function(event) {
@@ -184,46 +194,15 @@
         document.getElementById('copyGridValues').addEventListener('click', function(event) {
             event.preventDefault();
 
-            let flowFieldString = document.getElementById('flowField').dataset.gridString;
+            let flowFieldString = document.getElementById('flowField').dataset.gridStringForCopy;
 
             navigator.clipboard.writeText(flowFieldString)
                 .then(() => console.log('grid values copied to clipboard:', flowFieldString))
                 .catch(err => console.error('failed to copy grid values:', err));
         });
 
-        function createFlowFieldFromCurrentlyDisplayedGrid(gridValues) {
-            let values = gridValues.split(',');
-            gridWidth = parseInt(values[0]);
-            gridHeight = parseInt(values[1]);
-            scale = parseFloat(values[2]);
-            tilingEnabled = values[3] === 'true';
-            sine = parseFloat(values[4]);
-            power = parseFloat(values[5]);
-            frequency = parseFloat(values[6]);
-            amplitude = parseFloat(values[7]);
-
-            let grid = [];
-            let index = 8;
-            for (let y = 0; y < gridHeight; y++) {
-                let row = [];
-                for (let x = 0; x < gridWidth; x++) {
-                    let angle = parseFloat(values[index++]);
-                    let intensity = parseFloat(values[index++]);
-                    let averageAlignment = parseFloat(values[index++]);
-                    let vx = parseFloat(values[index++]);
-                    let vy = parseFloat(values[index++]);
-                    let isGravityZone = values[index++];
-                    row.push({ angle, intensity, averageAlignment, vx, vy, isGravityZone });
-                }
-                grid.push(row);
-            }
-
-            let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, grid);
-            return flowField;
-        }
-
         class FlowField {            
-            constructor(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, grid = null) {
+            constructor(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, perm) {
                 this.gridWidth = gridWidth;
                 this.gridHeight = gridHeight;
                 this.scale = scale;
@@ -233,7 +212,7 @@
                 this.frequency = frequency;
                 this.amplitude = amplitude;
 
-                this.grid = grid || this.createGrid();
+                this.createGrid(perm);
             }
 
             static generatePerlinPermutationTable() {
@@ -248,9 +227,13 @@
                 return perm;
             }
 
-            createGrid() {
+            createGrid(perm) {
                 let grid = [];
-                let perm = FlowField.generatePerlinPermutationTable();
+                if (perm == null) {
+                    perm = FlowField.generatePerlinPermutationTable();
+                    perm = perm.join(' ');
+                }
+                this.perm = perm;
 
                 for (let y = 0; y < this.gridHeight; y++) {
                     let row = [];
@@ -326,6 +309,7 @@
             displayOnWeb() {
                 let output = '';
                 let gridString = [this.gridWidth, this.gridHeight, this.scale, this.tilingEnabled, this.sine, this.power, this.frequency, this.amplitude];
+                let gridStringForCopy = [this.gridWidth, this.gridHeight, this.scale, this.tilingEnabled, this.sine, this.power, this.frequency, this.amplitude, this.perm];
 
                 for (let y = 0; y < this.gridHeight; y++) {
                     let row = '';
@@ -351,6 +335,7 @@
 
                 document.getElementById('flowField').innerHTML = output;
                 document.getElementById('flowField').dataset.gridString = gridString.join(',');
+                document.getElementById('flowField').dataset.gridStringForCopy = gridStringForCopy;
             }
 
             angleToArrow(angle, intensity, averageAlignment, vx, vy, x, y) {
