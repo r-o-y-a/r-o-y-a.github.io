@@ -96,7 +96,7 @@
             event.preventDefault();
 
             let gridValues = document.getElementById('gridValues').value;
-            let gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, perm;
+            let gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, perm, gravityZones;
 
             if (gridValues) {
                 let values = gridValues.split(',');
@@ -109,6 +109,7 @@
                 frequency = parseFloat(values[6]);
                 amplitude = parseFloat(values[7]);
                 perm = values[8];
+                gravityZones = values[9];
                
             } else {
                 gridWidth = parseInt(document.getElementById('gridWidth').value);
@@ -120,9 +121,10 @@
                 frequency = parseFloat(document.getElementById('frequency').value);
                 amplitude = parseFloat(document.getElementById('amplitude').value);
                 perm = null;
+                gravityZones = null;
             }
 
-            let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, perm);
+            let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, perm, gravityZones);
             flowField.displayOnWeb();
         });
 
@@ -130,6 +132,7 @@
             event.preventDefault();
 
             let gridValues = document.getElementById('flowField').dataset.gridString;
+            // TODO
             let flowField = createFlowFieldFromCurrentlyDisplayedGrid(gridValues);
 
             let startPoint = document.getElementById('startPoint').value;
@@ -202,7 +205,7 @@
         });
 
         class FlowField {            
-            constructor(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, perm) {
+            constructor(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, perm, gravityZones) {
                 this.gridWidth = gridWidth;
                 this.gridHeight = gridHeight;
                 this.scale = scale;
@@ -211,8 +214,9 @@
                 this.power = power;
                 this.frequency = frequency;
                 this.amplitude = amplitude;
+                this.gravityZones = gravityZones;
 
-                this.createGrid(perm);
+                this.createGrid(perm, gravityZones);
             }
 
             static generatePerlinPermutationTable() {
@@ -227,7 +231,7 @@
                 return perm;
             }
 
-            createGrid(perm) {
+            createGrid(perm, gravityZones) {
                 let grid = [];
                 if (perm == null) {
                     perm = FlowField.generatePerlinPermutationTable();
@@ -258,7 +262,7 @@
 
                 this.grid = grid;
 
-                this.createGravityZones();
+                this.createOrAddGravityZones(gravityZones);
                 this.addAlignmentInfo();
 
                 // this is the ultimate final grid dataset returned
@@ -267,9 +271,10 @@
                 return this.grid;
             }
 
-            createGravityZones() {
+            createOrAddGravityZones(gravityZones) {
                 const zoneWidth = 10;
                 const zoneHeight = 5;
+                const numGravityZones = 7;
                 
                 // clear existing gravity zones
                 this.grid.forEach(row => row.forEach(cell => cell.isGravityZone = false));
@@ -277,19 +282,43 @@
                 // get a random integer between min (inclusive) and max (exclusive)
                 const getRandomInt = (min, max) => Math.floor(Math.random() * (max - min)) + min;
 
-                // create 7 random gravity zones
-                for (let i = 0; i < 7; i++) {
-                    // generate random top-left corner for the zone
-                    const x = getRandomInt(0, this.gridWidth - zoneWidth + 1);
-                    const y = getRandomInt(0, this.gridHeight - zoneHeight + 1);
+                if (gravityZones == null || gravityZones == undefined) {
+                    var gravityZones = [];
+                    // create random gravity zones
+                    for (let i = 0; i < numGravityZones; i++) {
+                        // generate random top-left corner for the zone
+                        const x = getRandomInt(0, this.gridWidth - zoneWidth + 1);
+                        const y = getRandomInt(0, this.gridHeight - zoneHeight + 1);
 
-                    // update grid to mark the cells in the zone as gravity zones
-                    for (let row = y; row < y + zoneHeight; row++) {
-                        for (let col = x; col < x + zoneWidth; col++) {
-                            this.grid[row][col].isGravityZone = true;
+                        gravityZones.push([x + '|' + y]);
+
+                        // update grid to mark the cells in the zone as gravity zones
+                        for (let row = y; row < y + zoneHeight; row++) {
+                            for (let col = x; col < x + zoneWidth; col++) {
+                                this.grid[row][col].isGravityZone = true;
+                            }
+                        }
+                    }
+                    gravityZones = gravityZones.join(' ');
+                }
+                else {
+                    var x,y;
+                    var gravityZonesArray = gravityZones.split(' ');
+                    for (var i = 0; i < numGravityZones; i++) {
+                        var xy = gravityZonesArray[i].split('|');
+                        x = Number(xy[0]);
+                        y = Number(xy[1]);
+
+                        // update grid to mark the cells in the zone as gravity zones
+                        for (let row = y; row < y + zoneHeight; row++) {
+                            for (let col = x; col < x + zoneWidth; col++) {
+                                this.grid[row][col].isGravityZone = true;
+                            }
                         }
                     }
                 }
+
+                this.gravityZones = gravityZones;
             }
 
             addAlignmentInfo() {
@@ -309,7 +338,7 @@
             displayOnWeb() {
                 let output = '';
                 let gridString = [this.gridWidth, this.gridHeight, this.scale, this.tilingEnabled, this.sine, this.power, this.frequency, this.amplitude];
-                let gridStringForCopy = [this.gridWidth, this.gridHeight, this.scale, this.tilingEnabled, this.sine, this.power, this.frequency, this.amplitude, this.perm];
+                let gridStringForCopy = [this.gridWidth, this.gridHeight, this.scale, this.tilingEnabled, this.sine, this.power, this.frequency, this.amplitude, this.perm, this.gravityZones];
 
                 for (let y = 0; y < this.gridHeight; y++) {
                     let row = '';
