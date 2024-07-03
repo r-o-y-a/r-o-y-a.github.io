@@ -126,6 +126,8 @@
 
             let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, perm, gravityZones);
             flowField.displayOnWeb();
+            // checksum for Max
+            // console.log('intensity: ' + flowField.grid[2][0].intensity + '\n angle: ' + flowField.grid[2][0].angle);
         });
 
         document.getElementById('drawPath').addEventListener('click', function(event) {
