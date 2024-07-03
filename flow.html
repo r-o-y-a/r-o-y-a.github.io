@@ -127,7 +127,7 @@
             let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, perm, gravityZones);
             flowField.displayOnWeb();
             // checksum for Max
-            // console.log('intensity: ' + flowField.grid[2][0].intensity + '\n angle: ' + flowField.grid[2][0].angle);
+            console.log('intensity: ' + flowField.grid[2][0].intensity + '\n angle: ' + flowField.grid[2][0].angle);
         });
 
         document.getElementById('drawPath').addEventListener('click', function(event) {
@@ -212,9 +212,7 @@
 
             let flowFieldString = document.getElementById('flowField').dataset.gridStringForCopy;
 
-            navigator.clipboard.writeText(flowFieldString)
-                .then(() => console.log('grid values copied to clipboard:', flowFieldString))
-                .catch(err => console.error('failed to copy grid values:', err));
+            navigator.clipboard.writeText(flowFieldString);
         });
 
         class FlowField {            
@@ -279,7 +277,7 @@
                 this.addAlignmentInfo();
 
                 // this is the ultimate final grid dataset returned
-                console.log(this.grid);
+                //console.log(this.grid);
 
                 return this.grid;
             }
