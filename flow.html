@@ -79,7 +79,7 @@
             <br>
             <label for="startPoint" title="Enter the starting point for the path as x,y">Path Start Point:</label>
             <input type="text" id="startPoint" placeholder="x,y">    
-            <label for="gridValues" title="Paste the long string of grid values here.">Grid Values & Perm:</label>
+            <label for="gridValues" title="Paste the long string of grid values here.">Grid Values, Perm & Zones:</label>
             <input type="text" id="gridValues">
             <button type="submit">generate!</button>
             <a href="#" id="copyValues">copy form values</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
@@ -131,9 +131,20 @@
         document.getElementById('drawPath').addEventListener('click', function(event) {
             event.preventDefault();
 
-            let gridValues = document.getElementById('flowField').dataset.gridString;
-            // TODO
-            let flowField = createFlowFieldFromCurrentlyDisplayedGrid(gridValues);
+            let gridValues = document.getElementById('flowField').dataset.gridStringForCopy;
+            let values = gridValues.split(',');
+            gridWidth = parseInt(values[0]);
+            gridHeight = parseInt(values[1]);
+            scale = parseFloat(values[2]);
+            tilingEnabled = values[3] === 'true';
+            sine = parseFloat(values[4]);
+            power = parseFloat(values[5]);
+            frequency = parseFloat(values[6]);
+            amplitude = parseFloat(values[7]);
+            perm = values[8];
+            gravityZones = values[9];
+
+            let flowField = new FlowField(gridWidth, gridHeight, scale, tilingEnabled, sine, power, frequency, amplitude, perm, gravityZones);
 
             let startPoint = document.getElementById('startPoint').value;
             let path;
