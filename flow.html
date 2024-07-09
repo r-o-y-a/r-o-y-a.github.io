@@ -175,7 +175,7 @@
                 let y = cell.y;
                 let matchingDiv = Array.from(document.querySelectorAll('.arrow')).find(div => {
                     let titleParts = div.title.split(',');
-                    return titleParts.length === 3 && parseInt(titleParts[1]) === x && parseInt(titleParts[2]) === y;
+                    return titleParts.length > 3 && parseInt(titleParts[1]) === x && parseInt(titleParts[2]) === y;
                 });
 
                 if (matchingDiv) {
@@ -276,60 +276,243 @@
                 this.createOrAddGravityZones(gravityZones);
                 this.addAlignmentInfo();
 
-                // this is the ultimate final grid dataset returned
-                //console.log(this.grid);
-
                 return this.grid;
             }
 
             createOrAddGravityZones(gravityZones) {
-                const zoneWidth = 10;
-                const zoneHeight = 5;
-                const numGravityZones = 7;
+                var zoneWidth = 7;
+                var zoneHeight = 7;
+                var numGravityZones = 10;
+                var gravityZonesSurroundingCells = [];
                 
                 // clear existing gravity zones
-                this.grid.forEach(row => row.forEach(cell => cell.isGravityZone = false));
+                this.grid.forEach(function(row) {
+                    row.forEach(function(cell) {
+                        cell.isGravityZone = false;
+                        cell.gravityPull = 0; // pull strength on all other cells, 0-100
+                        cell.gravityEffects = []; 
+                    });
+                });
 
                 // get a random integer between min (inclusive) and max (exclusive)
                 const getRandomInt = (min, max) => Math.floor(Math.random() * (max - min)) + min;
 
                 if (gravityZones == null || gravityZones == undefined) {
                     var gravityZones = [];
+                    var harmonics = [3,4,5];
+                    var rate = [-2,-1,0,1,2]
+
                     // create random gravity zones
                     for (let i = 0; i < numGravityZones; i++) {
                         // generate random top-left corner for the zone
                         const x = getRandomInt(0, this.gridWidth - zoneWidth + 1);
                         const y = getRandomInt(0, this.gridHeight - zoneHeight + 1);
 
-                        gravityZones.push([x + '|' + y]);
+                        // generate random effects for the zone: [harmonics, rate]
+                        var randomHarmonicIndex = Math.floor(Math.random() * harmonics.length);
+                        var randomRateIndex = Math.floor(Math.random() * rate.length);
+
+                        gravityZones.push([x + '|' + y + '|' + harmonics[randomHarmonicIndex] + '|' + rate[randomRateIndex]]); // need to know for regenerating
 
                         // update grid to mark the cells in the zone as gravity zones
                         for (let row = y; row < y + zoneHeight; row++) {
                             for (let col = x; col < x + zoneWidth; col++) {
                                 this.grid[row][col].isGravityZone = true;
+                                this.grid[row][col].gravityPull = 100; // max value since we are in the zone
+                                this.grid[row][col].gravityEffects.harmonics = harmonics[randomHarmonicIndex];
+                                this.grid[row][col].gravityEffects.rate = rate[randomRateIndex];
                             }
                         }
+
+                        // update grid to mark surrounding cells with pull & effects
+                        var surroundingCellsPullValues = this.getGravityPullValuesForSurroundingCells(zoneWidth, zoneHeight, x, y);
+                        for (var cell = 0; cell < surroundingCellsPullValues.length; cell++) { 
+                            gravityZonesSurroundingCells.push({ 
+                            x: surroundingCellsPullValues[cell].x, 
+                            y: surroundingCellsPullValues[cell].y,
+                            pull: surroundingCellsPullValues[cell].pull,
+                            harmonics: harmonics[randomHarmonicIndex],
+                            rate: rate[randomRateIndex]
+                            });
+                        } 
+
                     }
                     gravityZones = gravityZones.join(' ');
                 }
                 else {
-                    var x,y;
+                    var x,y, harmonics, rate;
                     var gravityZonesArray = gravityZones.split(' ');
                     for (var i = 0; i < numGravityZones; i++) {
-                        var xy = gravityZonesArray[i].split('|');
-                        x = Number(xy[0]);
-                        y = Number(xy[1]);
+                        var zonesArray = gravityZonesArray[i].split('|');
+                        x = Number(zonesArray[0]);
+                        y = Number(zonesArray[1]);
+                        harmonics = Number(zonesArray[2]);
+                        rate = Number(zonesArray[3]);
 
                         // update grid to mark the cells in the zone as gravity zones
-                        for (let row = y; row < y + zoneHeight; row++) {
-                            for (let col = x; col < x + zoneWidth; col++) {
+                        for (var row = y; row < y + zoneHeight; row++) {
+                        if (this.grid[row] != undefined) { // check if at the edge of the grid
+                            for (var col = x; col < x + zoneWidth; col++) {
+                            if (this.grid[row][col] != undefined) { // check if at the edge of the grid
                                 this.grid[row][col].isGravityZone = true;
+                                this.grid[row][col].gravityPull = 100; // max value since we are in the zone
+                                this.grid[row][col].gravityEffects.harmonics = harmonics;
+                                this.grid[row][col].gravityEffects.rate = rate;
+                            }
+                            }
+                        }
+                        }
+
+                        var surroundingCellsPullValues = this.getGravityPullValuesForSurroundingCells(zoneWidth, zoneHeight, x, y);
+                        for (var c = 0; c < surroundingCellsPullValues.length; c++) { 
+                        gravityZonesSurroundingCells.push({ 
+                            x: surroundingCellsPullValues[c].x, 
+                            y: surroundingCellsPullValues[c].y,
+                            pull: surroundingCellsPullValues[c].pull,
+                            harmonics: harmonics,
+                            rate: rate
+                        });
+
+                        //console.log(surroundingCellsPullValues[c].x + "," + surroundingCellsPullValues[c].y + " pull: " + surroundingCellsPullValues[c].pull + " harmonics: " + harmonics + "\n")
+                        } 
+                    }
+                }
+
+                this.gravityZones = gravityZones;
+                this.applyGravityPullAndEffectsToGrid(gravityZonesSurroundingCells);
+            }
+
+            applyGravityPullAndEffectsToGrid(gravityZonesSurroundingCells) {
+
+                // eliminate duplicate cells with pull by taking the one with a higher pull value
+                // also weed out any surrounding cells in a gravity zone (since we calculated them one zone at a time)
+                var uniqueSurroundingCells = {};
+                for (var i = 0; i < gravityZonesSurroundingCells.length; i++) {
+                    var cell = gravityZonesSurroundingCells[i];
+                    if (this.grid[cell.y][cell.x].isGravityZone != true) {
+                        var key = cell.x + ',' + cell.y;
+                        if (!uniqueSurroundingCells[key] || cell.pull > uniqueSurroundingCells[key].pull) {
+                        uniqueSurroundingCells[key] = cell;
+                        }
+                    }
+                }
+
+                var resultUniqueCells = [];
+                for (var key in uniqueSurroundingCells) {
+                    if (uniqueSurroundingCells.hasOwnProperty(key)) {
+                    resultUniqueCells.push(uniqueSurroundingCells[key]);
+                    }
+                }
+
+                // update the cells on the grid with the new property info
+                for (var c = 0; c < resultUniqueCells.length; c++) { 
+                    if (this.grid[resultUniqueCells[c].y] != undefined && this.grid[resultUniqueCells[c].x] != undefined) { // make sure the surrounding cell actually exists on the grid since we created it
+                        this.grid[resultUniqueCells[c].y][resultUniqueCells[c].x].gravityPull = resultUniqueCells[c].pull;
+                        this.grid[resultUniqueCells[c].y][resultUniqueCells[c].x].gravityEffects.harmonics = resultUniqueCells[c].harmonics;
+                        this.grid[resultUniqueCells[c].y][resultUniqueCells[c].x].gravityEffects.rate = resultUniqueCells[c].rate;
+                    }
+                }
+
+                return this.grid;
+            }
+
+            getGravityPullValuesForSurroundingCells(zoneWidth, zoneHeight, topLeftX, topLeftY) {
+                var maxDistance = 5;//Math.floor(zoneWidth / 3); // use a third of the width as arbitrary pull radius
+                
+                // define the gravity zone cell locations
+                var gravityZone = [];
+                for (var x = topLeftX; x < topLeftX + zoneWidth; x++) {
+                    for (var y = topLeftY; y < topLeftY + zoneHeight; y++) {
+                        if (x >= 0 && x < this.gridWidth && y >= 0 && y < this.gridHeight) {
+                            gravityZone.push({ x: x, y: y });
+                        }
+                    }
+                }
+
+                var surroundingCells = this.findSurroundingCells(this.gridWidth, this.gridHeight, gravityZone, maxDistance);
+                return this.calculatePullForSurroundingCells(surroundingCells, gravityZone);
+            }
+
+            findSurroundingCells(gridWidth, gridHeight, gravityZone, maxDistance) {
+                var surroundingCells = [];
+                
+                for (var i = 0; i < gravityZone.length; i++) {
+                    var gx = gravityZone[i];
+                    for (var dx = -maxDistance; dx <= maxDistance; dx++) {
+                        for (var dy = -maxDistance; dy <= maxDistance; dy++) {
+                            if (Math.abs(dx) + Math.abs(dy) > maxDistance) continue;
+                            var nx = gx.x + dx;
+                            var ny = gx.y + dy;
+                            if (nx >= 0 && ny >= 0 && nx < gridWidth && ny < gridHeight) {
+                                if (this.grid[ny][nx].isGravityZone != true) {
+                                    surroundingCells.push({ x: nx, y: ny });
+                                }
                             }
                         }
                     }
                 }
 
-                this.gravityZones = gravityZones;
+                // Remove duplicates
+                var uniqueCells = [];
+                var uniqueSet = {};
+                for (var i = 0; i < surroundingCells.length; i++) {
+                    var cell = surroundingCells[i];
+                    var key = cell.x + ',' + cell.y;
+                    if (!uniqueSet[key]) {
+                        uniqueSet[key] = true;
+                        uniqueCells.push(cell);
+                    }
+                }
+
+                return uniqueCells;
+            }
+
+
+            calculatePullForSurroundingCells(surroundingCells, gravityZone) {
+                var gravityZoneBorder = gravityZone.filter(function(cell) {
+                    return FlowField.isBorder(cell, gravityZone);
+                });
+
+                surroundingCells = surroundingCells.map(function(cell) {
+                    var minDistance = Infinity;
+                    for (var i = 0; i < gravityZoneBorder.length; i++) {
+                        var distance = FlowField.calculateDistance(cell, gravityZoneBorder[i]);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                        }
+                    }
+                    cell.pull = minDistance;
+                    return cell;
+                });
+
+                var minDistance = Math.min.apply(Math, surroundingCells.map(function(cell) { return cell.pull; }));
+                var maxDistance = Math.max.apply(Math, surroundingCells.map(function(cell) { return cell.pull; }));
+
+                surroundingCells = surroundingCells.map(function(cell) {
+                    cell.pull = 90 - (cell.pull - minDistance) * (80 / (maxDistance - minDistance));
+                    return cell;
+                });
+
+                return surroundingCells;
+            }
+
+            static isBorder(cell, zone) {
+                var directions = [
+                    {x: 1, y: 0}, {x: -1, y: 0},
+                    {x: 0, y: 1}, {x: 0, y: -1}
+                ];
+                for (var i = 0; i < directions.length; i++) {
+                    var nx = cell.x + directions[i].x;
+                    var ny = cell.y + directions[i].y;
+                    if (!zone.some(function(z) { return z.x === nx && z.y === ny; })) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            static calculateDistance(cell1, cell2) {
+                return Math.sqrt(Math.pow(cell1.x - cell2.x, 2) + Math.pow(cell1.y - cell2.y, 2));
             }
 
             addAlignmentInfo() {
@@ -355,7 +538,7 @@
                     let row = '';
                     for (let x = 0; x < this.gridWidth; x++) {
                         let cell = this.grid[y][x];
-                        let cellContent = this.angleToArrow(cell.angle, cell.intensity, cell.averageAlignment, cell.vx, cell.vy, x, y);
+                        let cellContent = this.angleToArrow(cell.angle, cell.intensity, cell.averageAlignment, cell.vx, cell.vy, x, y, cell.gravityPull, cell.gravityEffects.harmonics, cell.gravityEffects.rate);
 
                         if (cell.isGravityZone) {
                             cellContent = cellContent.replace('class="arrow"', 'class="arrow-gravityZone"');
@@ -378,13 +561,13 @@
                 document.getElementById('flowField').dataset.gridStringForCopy = gridStringForCopy;
             }
 
-            angleToArrow(angle, intensity, averageAlignment, vx, vy, x, y) {
+            angleToArrow(angle, intensity, averageAlignment, vx, vy, x, y, pull, harmonics, rate) {
                 let arrowElement = document.createElement('div');
                 arrowElement.innerHTML = "↑";
                 arrowElement.className = 'arrow';
                 arrowElement.style.transform = `rotate(${angle}rad)`;
                 arrowElement.style.color = `rgba(0, 0, 0, ${intensity})`;
-                arrowElement.title = `${averageAlignment},${x},${y}`;
+                arrowElement.title = `${averageAlignment},${x},${y},pull: ${pull},harmonics: ${harmonics},rate: ${rate}`;
                 return arrowElement.outerHTML;
             }
 
