@@ -337,11 +337,11 @@
                         } 
 
                     }
-                    gravityZones = gravityZones.join(' ');
+                    gravityZones = gravityZones.join(':');
                 }
                 else {
                     var x,y, harmonics, rate;
-                    var gravityZonesArray = gravityZones.split(' ');
+                    var gravityZonesArray = gravityZones.split(':');
                     for (var i = 0; i < numGravityZones; i++) {
                         var zonesArray = gravityZonesArray[i].split('|');
                         x = Number(zonesArray[0]);
