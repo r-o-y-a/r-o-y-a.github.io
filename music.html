@@ -16,6 +16,17 @@
     Roya K. Naini
   </title>
   <link rel="stylesheet" href="index.css" />
+  <style>
+    .more-text {
+      display: none;
+      margin-top: 10px;
+    }
+    .toggle-link {
+      color: blue;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+  </style>
 </head>
 
 <body>
@@ -32,15 +43,36 @@
       </ul>
     </nav>
 
-    <div style="margin-left: 1em;">
-    <img src="images/tones_KMH_2024-05-06.png" width="15%" height="15%" style="margin-right: 1em; margin-left: 1em; float: left;" alt="Live performance at Royal College of Music - 2024-05-06"/>
+    <div style="margin-left: 1em; margin-right: 1em;">
+    <img src="images/tones_KMH_2024-05-06.png" width="20%" height="20%" style="margin-right: 1em; margin-left: 1em; float: left;" alt="Live performance at Royal College of Music - 2024-05-06"/>
 
     <strong>TONES</strong> is a composition and framework that explores the 
     fundamental interpretation of emotions by both machines and humans, delving into the interplay and cognitive conflict inherent in experiencing disparate emotions simultaneously.
+    <span id="toggle-link" class="toggle-link">+ read more</span>
+    <div id="more-text" class="more-text">
+      The piece functions by way of a line of text which is reduced to two emotions, primary and secondary, by a machine-learning algorithm. The system then outputs an associated musical phrase composed in advance by the composer for each emotion: electroacoustic tones for the first emotion and musical notation for the second emotion. The musical notation is interpreted once more by a live musician. The same approximate phrases are used in both performance types to give each emotion a distinct musical identity. 
+      <br />  <br />The resulting chain of these interpretations, machine to composer to musician, and their musical interaction together in variable forms and combinations is the groundwork for this composition.
+  
+      The resulting musical concept draws from through-composed and counterpoint techniques. Each line presents two new musical phrases that may be harmonious, in direct conflict with each other, or simply coexist. It is expectedly atonal during clashes on the emotional spectrum and at other times a surprising mesh of two emotions that resolve harmoniously. Throughout performance, the composer controls the initial text entry and whether to isolate specific musical phrases or regulate the timing of specific points for emphasis.
+    </div>
+  
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        var moreText = document.getElementById('more-text');
+        var link = document.getElementById('toggle-link');
+  
+        link.addEventListener('click', function() {
+          if (moreText.style.display === 'none' || moreText.style.display === '') {
+            moreText.style.display = 'block';
+            link.textContent = '- read less'; 
+          } else {
+            moreText.style.display = 'none';
+            link.textContent = '+ read more'; 
+          }
+        });
+      });
+    </script>
 
-<br /><br />The piece functions by way of a line of text which is reduced to two emotions, primary and secondary, by a machine-learning algorithm. The system then outputs an associated musical phrase composed in advance by the composer for each emotion: electroacoustic tones for the first emotion and musical notation for the second emotion. The musical notation is interpreted once more by a live musician. The same approximate phrases are used in both performance types to give each emotion a distinct musical identity. The resulting chain of these interpretations, machine to composer to musician, and their musical interaction together in variable forms and combinations is the groundwork for this composition.
-<br /><br />
-The resulting musical concept draws from through-composed and counterpoint techniques. Each line presents two new musical phrases that may be harmonious, in direct conflict with eachother or simply coexist. It is expectedly atonal during clashes on the emotional spectrum and at other times a surprising mesh of two emotions that resolve harmoniously. Throughout performance the composer controls the initial text entry and whether to isolate specific musical phrases or regulate the timing of specific points for emphasis.
 <br /><br />
 technical details: SuperCollider, python, OSC, JavaScript. (<a href="https://github.com/r-o-y-a/tones">code on github</a>)
 <br /><br />
