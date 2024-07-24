@@ -9,20 +9,78 @@
   <meta name="robots" content="index,follow">
   <meta name="description" content="Roya K. Naini">
   <meta name="abstract" content="Roya K. Naini">
-  <meta name="author" content="Fredrik Olofsson">
-  <meta name="keywords" ontent="music,musik,composer,kompositör,producer,producent,tonsättare,electroacoustic,electro-acoustic,elektroakustisk,roya,naini">
+  <meta name="keywords" content="music,musik,composer,kompositör,producer,producent,tonsättare,electroacoustic,electro-acoustic,elektroakustisk,roya,naini">
   <meta property="og:title" content="Roya K. Naini">
   <meta property="og:description" content="Roya K. Naini">
-  <title>
-    Roya K. Naini
-  </title>
+  <title>Roya K. Naini</title>
   <link rel="stylesheet" href="index.css" />
+  <style>
+    body {
+      margin: 0;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      padding: 20px;
+    }
+    .nav {
+      text-align: left;
+      margin: 0;
+    }
+    .nav__items {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .nav__item {
+      margin: 0;
+    }
+    .nav__link {
+      text-decoration: none;
+      color: black;
+      font-size: 14px;
+      padding: 4px 8px;
+    }
+    .content {
+      text-align: left;
+      font-size: 14px;
+      max-width: 850px;
+    }
+    img {
+      width: 200px;
+      height: 250px;
+      margin-right: 20px;
+      margin-left: 20px;
+      float: left;
+    }
+    @media (max-width: 600px) {
+      .nav__items {
+        gap: 8px;
+      }
+      .nav__link {
+        font-size: 12px;
+        padding: 3px 6px;
+      }
+      .content {
+        font-size: 12px;
+      }
+      img {
+        width: 100%;
+        height: auto;
+        float: none;
+        display: block;
+        margin: 0 auto;
+      }
+    }
+  </style>
 </head>
 
 <body>
-
-
-  <div style="text-align: center;">
+  <div class="container">
     <nav class="nav" role="navigation">
       <h1><a href="index.html">ROYA K. NAINI</a></h1>
       <ul class="nav__items">
@@ -33,46 +91,39 @@
       </ul>
     </nav>
 
-
-    <div style="width: 850px; text-align: left; margin-left: 75px;">
-      <img src="images/tones_KMH_2024-05-06.png" width="200" height="250" style="margin-right: 20px; margin-left: 20px; float: left;" alt="Live performance at Royal College of Music - 2024-05-06"/>
-
+    <div class="content">
+      <img src="images/tones_KMH_2024-05-06.png" alt="Live performance at Royal College of Music - 2024-05-06" />
       <strong>TONES</strong> is a composition and framework that explores the fundamental interpretation of emotions by both machines and humans, delving into the interplay and cognitive conflict inherent in experiencing disparate emotions simultaneously.
-
-<br /><br />The piece functions by way of a line of text which is reduced to two emotions, primary and secondary, by a machine-learning algorithm. The system then outputs an associated musical phrase composed in advance by the composer for each emotion: electroacoustic tones for the first emotion and musical notation for the second emotion. The musical notation is interpreted once more by a live musician. The same approximate phrases are used in both performance types to give each emotion a distinct musical identity. The resulting chain of these interpretations, machine to composer to musician, and their musical interaction together in variable forms and combinations is the groundwork for this composition.
-<br /><br />
-The resulting musical concept draws from through-composed and counterpoint techniques. Each line presents two new musical phrases that may be harmonious, in direct conflict with eachother or simply coexist. It is expectedly atonal during clashes on the emotional spectrum and at other times a surprising mesh of two emotions that resolve harmoniously. Throughout performance the composer controls the initial text entry and whether to isolate specific musical phrases or regulate the timing of specific points for emphasis.
-<br /><br />
-technical details: SuperCollider, python, OSC, JavaScript. (<a href="https://github.com/r-o-y-a/tones">code on github</a>)
-<br /><br />
-<i>Photo: Live performance at Royal College of Music in Stockholm (Kungliga Musikhögskolan), 2024-05-06<br />
-In this performance I used excerpts from Allen Ginsberg’s poem America and composed the electroacoustic musical phrases using samples from church organ and persian santur. The musical notation was interpreted on violin by Tilde Edlund.
-</i><br /><br /><br /><br />
-</div>
-
-
-  <footer role="contentinfo" class="footer">
-    <div class="row">
-      <ul class="footer__social-links">
-        <li class="footer__social-link-item">
-          <a href="https://github.com/r-o-y-a/" title="Link to Github Profile">
-            <img src="./images/github.svg" class="footer__social-image" alt="Github">
-          </a>
-        </li>
-        <li class="footer__social-link-item">
-          <a href="https://instagram.com/_r_o_y_a_" title="Link to Instagram">
-            <img src="./images/instagram.svg" class="footer__social-image" alt="Instagram">
-          </a>
-        </li>
-      </ul>
-      </div>
+      <br /><br />
+      The piece functions by way of a line of text which is reduced to two emotions, primary and secondary, by a machine-learning algorithm. The system then outputs an associated musical phrase composed in advance by the composer for each emotion: electroacoustic tones for the first emotion and musical notation for the second emotion. The musical notation is interpreted once more by a live musician. The same approximate phrases are used in both performance types to give each emotion a distinct musical identity. The resulting chain of these interpretations, machine to composer to musician, and their musical interaction together in variable forms and combinations is the groundwork for this composition.
+      <br /><br />
+      The resulting musical concept draws from through-composed and counterpoint techniques. Each line presents two new musical phrases that may be harmonious, in direct conflict with each other, or simply coexist. It is expectedly atonal during clashes on the emotional spectrum and at other times a surprising mesh of two emotions that resolve harmoniously. Throughout performance, the composer controls the initial text entry and whether to isolate specific musical phrases or regulate the timing of specific points for emphasis.
+      <br /><br />
+      technical details: SuperCollider, python, OSC, JavaScript. (<a href="https://github.com/r-o-y-a/tones">code on github</a>)
+      <br /><br />
+      <i>Photo: Live performance at Royal College of Music in Stockholm (Kungliga Musikhögskolan), 2024-05-06<br />
+      In this performance, I used excerpts from Allen Ginsberg’s poem America and composed the electroacoustic musical phrases using samples from church organ and Persian santur. The musical notation was interpreted on violin by Tilde Edlund.
+      </i>
+      <br /><br /><br /><br />
     </div>
-  </footer>
 
-
-</div>
-
-
+    <footer role="contentinfo" class="footer">
+      <div class="row">
+        <ul class="footer__social-links">
+          <li class="footer__social-link-item">
+            <a href="https://github.com/r-o-y-a/" title="Link to Github Profile">
+              <img src="./images/github.svg" class="footer__social-image" alt="Github">
+            </a>
+          </li>
+          <li class="footer__social-link-item">
+            <a href="https://instagram.com/_r_o_y_a_" title="Link to Instagram">
+              <img src="./images/instagram.svg" class="footer__social-image" alt="Instagram">
+            </a>
+          </li>
+        </ul>
+      </div>
+    </footer>
+  </div>
 </body>
 
 </html>
