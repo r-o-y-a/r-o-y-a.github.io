@@ -2,6 +2,10 @@
 <html>
 <head>
     <style>
+        body {
+            background-color: black;
+            color: white;
+        }
         .flow-field {
             font-family: monospace;
             line-height: 1.2;
@@ -12,6 +16,7 @@
             height: 0;
             border-bottom-color: black;
             transform-origin: center;
+            color: #606065;
         }
         .arrow-gravityZone {
             display: inline-block;
@@ -19,7 +24,7 @@
             height: 0;
             border-bottom-color: black;
             transform-origin: center;
-            color: blue !important;
+            color: rgb(174, 168, 168) !important;
         }
         .form-group {
             margin-bottom: 10px;
@@ -44,12 +49,12 @@
             color: black;
         }
         .highlighted {
-            color: red !important; 
+            color: rgb(151, 41, 41) !important; 
             font-weight: bold;
             font-size: 1em;
         }
         .start-point {
-            color: green !important; 
+            color: rgb(232, 17, 17) !important; 
             font-weight: bolder;
             font-size: 1.9em;
         }
@@ -566,7 +571,7 @@
                 arrowElement.innerHTML = "↑";
                 arrowElement.className = 'arrow';
                 arrowElement.style.transform = `rotate(${angle}rad)`;
-                arrowElement.style.color = `rgba(0, 0, 0, ${intensity})`;
+                arrowElement.style.color = `rgba(174, 168, 168, ${intensity})`;
                 arrowElement.title = `${averageAlignment},${x},${y},pull: ${pull},harmonics: ${harmonics},rate: ${rate}`;
                 return arrowElement.outerHTML;
             }
