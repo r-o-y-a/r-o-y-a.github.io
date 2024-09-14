@@ -12,6 +12,40 @@
   <meta name="description" content="artist, producer, composer">
   <meta name="keywords" content="roya, music, electronic, electro-acoustic, composer" />
   <link rel="stylesheet" href="index.css" />
+
+  <style>
+    .modal {
+        display: none;
+        position: absolute; 
+        z-index: 1;
+        background-color: rgba(0, 0, 0, 0.7);
+        border-radius: 8px;
+    }
+
+    .modal-content {
+        position: relative;
+        width: 320px;
+        max-width: 100%;
+        background-color: #fff;
+        padding: 10px;
+        border-radius: 8px;
+    }
+
+    .close {
+        color: #aaa;
+        position: absolute;
+        top: 5px;
+        right: 10px;
+        font-size: 25px;
+        cursor: pointer;
+    }
+
+    video {
+        width: 100%;
+        height: auto;
+        border-radius: 5px;
+    }
+</style>
 </head>
 
 <body>
@@ -28,7 +62,7 @@
     </nav>
 
     <div style="text-align: left; margin-left: 2em;width:50%">
-    Roya is an American and Swedish artist and composer working within the fields of electronic and electro-acoustic music. She has produced and released various albums and performed live in Sweden and North America. Her compositions often incorporate a sense of drama and heightened tensions that explore lurid themes of the human psyche. She holds a special affinity for stark dynamics and contrasts, influenced heavily by visual arts where light and shadow play important roles. 
+    Roya is an American and Swedish artist and composer working within the fields of electronic and electro-acoustic music. She has produced and released albums and performed live in Sweden and North America. Her compositions often incorporate a sense of drama and heightened tensions that explore lurid themes of the human psyche. She holds a special affinity for stark dynamics and contrasts, influenced heavily by visual arts where light and shadow play important roles. 
 
     </div>
     
@@ -47,11 +81,51 @@
       <br />
       Stipendium / Awards<br />
       2022 - STIM Stipendium<br />
-      2020 - Kulturrådet, Musikutgivning bidrag<br />
+      2020 - Kulturrådet / Swedish Arts Council, Music publishing grant<br />
       2019 - Manifestgalan, Swedish Independent Music award, Årets Synth<br />
       <br />
       Memberships<br />
       Fylkingen, SKAP, STIM<br />
+      <br />
+      Film/TV<br />
+      2018 - Beck, Ditt Eget Blod - <a href="#" class="openModalLink">TV trailer music</a>
+
+    <div id="videoModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <video controls>
+                <source src="./images/beck_tvtrailer.mp4" type="video/mp4">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+    </div>
+
+    <script>
+        var modal = document.getElementById("videoModal");
+        var openLink = document.getElementsByClassName("openModalLink")[0];
+        var closeBtn = document.getElementsByClassName("close")[0];
+
+        openLink.onclick = function(event) {
+            event.preventDefault(); 
+            
+            var linkRect = openLink.getBoundingClientRect(); 
+            modal.style.left = linkRect.left + "px";
+            modal.style.top = (linkRect.top + window.scrollY) + "px"; 
+            modal.style.display = "block";
+        }
+
+        closeBtn.onclick = function() {
+            modal.style.display = "none";
+        }
+
+        window.onclick = function(event) {
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
+        }
+    </script>
+
+
 
     </div>
 
