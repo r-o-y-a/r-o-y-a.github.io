@@ -33,7 +33,14 @@
       display: table;
       clear: both;
     }
+    .audiojs { margin: 15px 0px 20px; }
   </style>
+  <script src="./audiojs/audio.min.js"></script>
+  <script>
+    audiojs.events.ready(function() {
+      audiojs.createAll();
+    });
+  </script>
 </head>
 
 <body>
@@ -130,6 +137,8 @@
 
       <strong>TACEO NO. 1 FOR PIANO</strong> - Musique concrète composition for two pianos.
       <br /><br />
+      <audio src="wav/taceo_no_1_for_piano.wav" preload="auto" />
+
       <iframe width="90%" height="166" scrolling="no" frameborder="no" allow="autoplay" src="https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/tracks/1809193224%3Fsecret_token%3Ds-6d49QXP3aRA&color=%23ff5500&auto_play=false&hide_related=false&show_comments=true&show_user=true&show_reposts=false&show_teaser=true"></iframe><div style="font-size: 10px; color: #cccccc;line-break: anywhere;word-break: normal;overflow: hidden;white-space: nowrap;text-overflow: ellipsis; font-family: Interstate,Lucida Grande,Lucida Sans Unicode,Lucida Sans,Garuda,Verdana,Tahoma,sans-serif;font-weight: 100;"></div>
 
     </div>
