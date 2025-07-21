@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Device Info Viewer</title>
+  <style>
+    body { font-family: sans-serif; margin: 2em; background: #f9f9f9; }
+    h1 { font-size: 1.5em; }
+    code { background: #eee; padding: 2px 4px; }
+  </style>
+</head>
+<body>
+  <h1>Your Device Info</h1>
+  <ul id="info"></ul>
+
+  <script>
+    const infoList = document.getElementById('info');
+
+    const data = {
+      "User Agent": navigator.userAgent,
+      "Platform": navigator.platform,
+      "Language": navigator.language,
+      "Screen Resolution": `${screen.width} x ${screen.height}`,
+      "Window Size": `${window.innerWidth} x ${window.innerHeight}`,
+      "Time Zone": Intl.DateTimeFormat().resolvedOptions().timeZone,
+      "Cookies Enabled": navigator.cookieEnabled,
+      "JavaScript Enabled": true,
+      "Touch Support": 'ontouchstart' in window,
+      "Battery": "Detecting...",
+      "Connection Type": navigator.connection ? navigator.connection.effectiveType : "Unavailable"
+    };
+
+    for (let key in data) {
+      const li = document.createElement('li');
+      li.textContent = `${key}: ${data[key]}`;
+      infoList.appendChild(li);
+    }
+
+    // Battery info
+    if (navigator.getBattery) {
+      navigator.getBattery().then(battery => {
+        const li = document.createElement('li');
+        li.textContent = `Battery Level: ${Math.round(battery.level * 100)}%`;
+        infoList.appendChild(li);
+      });
+    }
+
+    // Get IP and rough location (via external API)
+    fetch('https://api.ipify.org?format=json')
+      .then(res => res.json())
+      .then(data => {
+        const li = document.createElement('li');
+        li.textContent = `Public IP Address: ${data.ip}`;
+        infoList.appendChild(li);
+      });
+  </script>
+</body>
+</html>
