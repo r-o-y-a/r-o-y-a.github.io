@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>First-Person 8-Speaker Room</title>
+<style>
+  :root{--bg:#071025;--panel:#07182a;--muted:#9fb0c8;--accent:#8a6bff}
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),#041522);color:#e6eef6;font-family:system-ui,Segoe UI,Roboto,Arial}
+  #ui{position:fixed;left:12px;top:12px;width:320px;background:rgba(6,14,28,0.7);backdrop-filter:blur(6px);border-radius:10px;padding:12px;border:1px solid rgba(255,255,255,0.03);z-index:10}
+  label{font-size:13px;color:var(--muted);display:block;margin-top:8px}
+  input[type=file]{width:100%}
+  .row{display:flex;gap:8px;align-items:center;margin-top:8px}
+  .chip{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:8px;font-size:13px;color:var(--muted)}
+  button{background:var(--accent);border:0;padding:8px 10px;border-radius:8px;color:#071022;font-weight:700;cursor:pointer}
+  #canvas{display:block;width:100vw;height:100vh}
+  #hud{position:fixed;right:12px;top:12px;color:var(--muted);z-index:10;background:rgba(3,8,14,0.45);padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.03)}
+  .small{font-size:13px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="ui">
+  <div style="font-weight:700;color:var(--accent);margin-bottom:6px">First-Person 8-Speaker Room</div>
+  <div class="small">Click canvas to lock mouse, WASD to move, mouse to look.</div>
+
+  <div id="fileInputs" style="margin-top:8px"></div>
+
+  <label>Room radius (m)</label>
+  <div class="row"><input id="roomRadius" type="range" min="3" max="40" value="18" style="flex:1"><div class="chip" id="roomRadiusVal">18 m</div></div>
+
+  <label>Move speed (m/s)</label>
+  <div class="row"><input id="speed" type="range" min="0.5" max="8" step="0.1" value="3" style="flex:1"><div class="chip" id="speedVal">3.0</div></div>
+
+  <label>Attenuation exponent</label>
+  <div class="row"><input id="expo" type="range" min="0.5" max="6" step="0.1" value="2" style="flex:1"><div class="chip" id="expoVal">2.0</div></div>
+
+  <label>Master volume</label>
+  <div class="row"><input id="master" type="range" min="0" max="1" step="0.01" value="0.9" style="flex:1"><div class="chip" id="masterVal">0.90</div></div>
+
+  <div style="display:flex;gap:8px;margin-top:10px">
+    <button id="startBtn">Start Audio</button>
+    <button id="centerBtn" title="center camera">Center</button>
+  </div>
+
+  <div style="margin-top:8px;font-size:12px;color:var(--muted)">Optional: drag WAVs into each speaker slot. You can also add small PNG/JPG per speaker (used as billboard in view).</div>
+</div>
+
+<canvas id="canvas"></canvas>
+<div id="hud" class="small">x:0.00 y:0.00 yaw:0° nearest:—</div>
+
+<script>
+(() => {
+  const NUM = 8;
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const fileInputs = document.getElementById('fileInputs');
+  const startBtn = document.getElementById('startBtn');
+  const centerBtn = document.getElementById('centerBtn');
+  const roomRadiusInput = document.getElementById('roomRadius');
+  const roomRadiusVal = document.getElementById('roomRadiusVal');
+  const speedInput = document.getElementById('speed');
+  const speedVal = document.getElementById('speedVal');
+  const expoInput = document.getElementById('expo');
+  const expoVal = document.getElementById('expoVal');
+  const masterInput = document.getElementById('master');
+  const masterVal = document.getElementById('masterVal');
+  const hud = document.getElementById('hud');
+
+  // create file inputs (audio + optional image) for 8 speakers
+  for (let i=0;i<NUM;i++){
+    const wrap = document.createElement('div');
+    wrap.style.display='grid'; wrap.style.gridTemplateColumns='28px 1fr 36px'; wrap.style.gap='8px'; wrap.style.marginTop='8px'; wrap.style.alignItems='center';
+    const lbl = document.createElement('div'); lbl.textContent = i+1; lbl.style.fontWeight='700'; lbl.style.textAlign='center';
+    const aud = document.createElement('input'); aud.type='file'; aud.accept='audio/*'; aud.dataset.idx=i;
+    const imgBtn = document.createElement('input'); imgBtn.type='file'; imgBtn.accept='image/*'; imgBtn.title='Optional image'; imgBtn.dataset.idx=i;
+    aud.addEventListener('change', (e)=> loadAudioFile(e.target.files[0], Number(e.target.dataset.idx)));
+    imgBtn.addEventListener('change', (e)=> loadImageFile(e.target.files[0], Number(e.target.dataset.idx)));
+    wrap.appendChild(lbl); wrap.appendChild(aud); wrap.appendChild(imgBtn);
+    fileInputs.appendChild(wrap);
+  }
+
+  // audio
+  let audioCtx = null;
+  let masterGain = null;
+  const speakers = [];
+  let started = false;
+
+  // room & camera
+  const room = { radius: Number(roomRadiusInput.value) };
+  const camera = { x:0, y:0, z:1.7, yaw:0, pitch:0, speed: Number(speedInput.value) }; // yaw radians
+  const keys = {w:false,a:false,s:false,d:false,ArrowUp:false,ArrowDown:false,ArrowLeft:false,ArrowRight:false};
+  let lastTS = null;
+  let pointerLocked = false;
+
+  // canvas resize
+  function resize(){ canvas.width = innerWidth * devicePixelRatio; canvas.height = innerHeight * devicePixelRatio; canvas.style.width = innerWidth + 'px'; canvas.style.height = innerHeight + 'px'; ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
+  addEventListener('resize', resize); resize();
+
+  // initialize speaker positions (circle, start at front)
+  function initSpeakers(){
+    speakers.length = 0;
+    for (let i=0;i<NUM;i++){
+      const ang = (i/NUM)*Math.PI*2; // 0 = right; rotate so 0 is front
+      const angle = ang - Math.PI/2;
+      const x = Math.cos(angle) * room.radius;
+      const y = Math.sin(angle) * room.radius;
+      speakers.push({
+        angle, x, y, buffer:null, source:null, gainNode:null, panner:null, file:null,
+        img:null, imgBitmap:null, color:`hsl(${(i/NUM)*360} 70% 60%)`
+      });
+    }
+  }
+  initSpeakers();
+
+  roomRadiusInput.addEventListener('input', ()=>{
+    room.radius = Number(roomRadiusInput.value);
+    roomRadiusVal.textContent = roomRadiusInput.value + ' m';
+    initSpeakers();
+  });
+  speedInput.addEventListener('input', ()=> { camera.speed = Number(speedInput.value); speedVal.textContent = Number(speedInput.value).toFixed(1); });
+  expoInput.addEventListener('input', ()=> expoVal.textContent = Number(expoInput.value).toFixed(1));
+  masterInput.addEventListener('input', ()=> { masterVal.textContent = Number(masterInput.value).toFixed(2); if(masterGain) masterGain.gain.setValueAtTime(Number(masterInput.value), audioCtx.currentTime); });
+
+  // load audio file
+  async function loadAudioFile(file, idx){
+    if (!file) return;
+    speakers[idx].file = file;
+    ensureAudioCtx();
+    const ab = await file.arrayBuffer();
+    const buf = await audioCtx.decodeAudioData(ab);
+    speakers[idx].buffer = buf;
+    if (started) createSource(idx);
+  }
+  async function loadImageFile(file, idx){
+    if (!file) return;
+    speakers[idx].img = file;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    speakers[idx].imgBitmap = img;
+  }
+
+  function ensureAudioCtx(){
+    if (audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = Number(masterInput.value);
+    masterGain.connect(audioCtx.destination);
+  }
+
+  function createSource(i){
+    const sp = speakers[i];
+    if (!sp.buffer) return;
+    if (sp.source){ try{ sp.source.stop(); }catch(e){} sp.source.disconnect(); }
+    const src = audioCtx.createBufferSource();
+    src.buffer = sp.buffer;
+    src.loop = true;
+    const gain = audioCtx.createGain(); gain.gain.value = 0;
+    const panner = audioCtx.createPanner();
+    panner.panningModel = 'HRTF';
+    panner.distanceModel = 'linear';
+    panner.refDistance = 1;
+    panner.maxDistance = room.radius * 3;
+    panner.rolloffFactor = 0; // we'll control attenuation manually
+    src.connect(gain);
+    gain.connect(panner);
+    panner.connect(masterGain);
+    src.start(0);
+    sp.source = src; sp.gainNode = gain; sp.panner = panner;
+    updatePannerPosition(i);
+  }
+
+  function startAll(){
+    for (let i=0;i<NUM;i++) if (speakers[i].buffer && !speakers[i].source) createSource(i);
+  }
+
+  startBtn.addEventListener('click', async ()=>{
+    ensureAudioCtx();
+    await audioCtx.resume();
+    started = true;
+    startAll();
+    startBtn.disabled = true;
+    lastTS = performance.now();
+    requestAnimationFrame(loop);
+  });
+
+  centerBtn.addEventListener('click', ()=>{ camera.x=0; camera.y=0; camera.yaw=0; camera.pitch=0; });
+
+  // pointer lock & mouse look
+  canvas.addEventListener('click', ()=> { if(!pointerLocked) canvas.requestPointerLock?.(); });
+  document.addEventListener('pointerlockchange', ()=> {
+    pointerLocked = (document.pointerLockElement === canvas);
+  });
+  document.addEventListener('mousemove', (e)=>{
+    if (!pointerLocked) return;
+    const sensitivity = 0.0025;
+    camera.yaw += e.movementX * sensitivity;
+    camera.pitch += -e.movementY * sensitivity;
+    camera.pitch = Math.max(-Math.PI/2 + 0.01, Math.min(Math.PI/2 - 0.01, camera.pitch));
+  });
+
+  // keyboard
+  addEventListener('keydown', e=>{ const k=e.key.toLowerCase(); if(k in keys) keys[k]=true; if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)) e.preventDefault(); });
+  addEventListener('keyup', e=>{ const k=e.key.toLowerCase(); if(k in keys) keys[k]=false; });
+
+  // movement
+  function moveCamera(dt){
+    let fx=0, fy=0;
+    if (keys.w || keys['arrowup']) fy -= 1;
+    if (keys.s || keys['arrowdown']) fy += 1;
+    if (keys.a || keys['arrowleft']) fx -= 1;
+    if (keys.d || keys['arrowright']) fx += 1;
+    if (fx===0 && fy===0) return;
+    const len = Math.hypot(fx,fy);
+    fx/=len; fy/=len;
+    // convert local forward/right to world
+    const forwardX = Math.cos(camera.yaw);
+    const forwardY = Math.sin(camera.yaw);
+    const rightX = Math.cos(camera.yaw + Math.PI/2);
+    const rightY = Math.sin(camera.yaw + Math.PI/2);
+    const speed = camera.speed;
+    camera.x += (forwardX * fy + rightX * fx) * speed * dt;
+    camera.y += (forwardY * fy + rightY * fx) * speed * dt;
+    // clamp inside room circle
+    const d = Math.hypot(camera.x, camera.y);
+    const max = room.radius - 0.5;
+    if (d > max){ camera.x *= max/d; camera.y *= max/d; }
+  }
+
+  // update audio listener & panners
+  function updateAudioPositions(){
+    if (!audioCtx) return;
+    const ex = Number(expoInput.value);
+    const maxD = room.radius;
+    // listener
+    const L = audioCtx.listener;
+    if (L.positionX){ L.positionX.setValueAtTime(camera.x, audioCtx.currentTime); L.positionY.setValueAtTime(camera.y, audioCtx.currentTime); L.positionZ.setValueAtTime(camera.z, audioCtx.currentTime); 
+      // forward vector from yaw/pitch
+      const fx = Math.cos(camera.pitch) * Math.cos(camera.yaw);
+      const fy = Math.cos(camera.pitch) * Math.sin(camera.yaw);
+      const fz = Math.sin(camera.pitch);
+      if (L.forwardX) { L.forwardX.setValueAtTime(fx, audioCtx.currentTime); L.forwardY.setValueAtTime(fy, audioCtx.currentTime); L.forwardZ.setValueAtTime(fz, audioCtx.currentTime); }
+      if (L.upX) { L.upX.setValueAtTime(0, audioCtx.currentTime); L.upY.setValueAtTime(0, audioCtx.currentTime); L.upZ.setValueAtTime(1, audioCtx.currentTime); }
+    } else {
+      try{ L.setPosition(camera.x, camera.y, camera.z); const fx = Math.cos(camera.pitch) * Math.cos(camera.yaw); const fy = Math.cos(camera.pitch) * Math.sin(camera.yaw); const fz = Math.sin(camera.pitch); L.setOrientation(fx,fy,fz,0,0,1); }catch(e){}
+    }
+
+    let nearest = {idx:-1,d:Infinity};
+    for (let i=0;i<NUM;i++){
+      const sp = speakers[i];
+      // panner position (z=0)
+      if (sp.panner){ sp.panner.positionX?.setValueAtTime(sp.x, audioCtx.currentTime); sp.panner.positionY?.setValueAtTime(sp.y, audioCtx.currentTime); sp.panner.positionZ?.setValueAtTime(0, audioCtx.currentTime); }
+      const dx = sp.x - camera.x, dy = sp.y - camera.y;
+      const d = Math.hypot(dx, dy);
+      if (d < nearest.d) nearest = {idx:i,d};
+      const norm = Math.min(d / maxD, 1);
+      const gainVal = Math.max(0, Math.pow(1 - norm, ex));
+      if (sp.gainNode) { sp.gainNode.gain.cancelScheduledValues(audioCtx.currentTime); sp.gainNode.gain.linearRampToValueAtTime(gainVal, audioCtx.currentTime + 0.05); }
+    }
+    return nearest;
+  }
+
+  function updatePannerPosition(i){
+    const sp = speakers[i];
+    if (!sp.panner) return;
+    sp.panner.positionX?.setValueAtTime(sp.x, audioCtx.currentTime);
+    sp.panner.positionY?.setValueAtTime(sp.y, audioCtx.currentTime);
+    sp.panner.positionZ?.setValueAtTime(0, audioCtx.currentTime);
+  }
+
+  // rendering: simple billboard sprites using camera transform
+  function renderScene(nearest){
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    ctx.clearRect(0,0,w,h);
+    // sky / floor
+    const skyGrad = ctx.createLinearGradient(0,0,0,h);
+    skyGrad.addColorStop(0,'#0b2a3b'); skyGrad.addColorStop(0.6,'#05202a'); skyGrad.addColorStop(1,'#022022');
+    ctx.fillStyle = skyGrad; ctx.fillRect(0,0,w,h);
+    // center horizon line
+    const cx = w/2, cy = h/2;
+
+    // simple crosshair
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx-8, cy); ctx.lineTo(cx+8, cy); ctx.moveTo(cx, cy-8); ctx.lineTo(cx, cy+8); ctx.stroke();
+
+    // draw speakers as billboards
+    const f = 800; // focal length
+    for (let i=0;i<NUM;i++){
+      const sp = speakers[i];
+      // world vector relative to camera
+      const dx = sp.x - camera.x;
+      const dy = sp.y - camera.y;
+      // camera rotation: rotate so camera faces +x by yaw (we used forwardX = cos yaw)
+      // transform to camera space
+      const rx =  Math.cos(-camera.yaw)*dx - Math.sin(-camera.yaw)*dy;
+      const rz =  Math.sin(-camera.yaw)*dx + Math.cos(-camera.yaw)*dy; // forward distance
+      const depth = rz;
+      if (depth <= 0.2) continue; // behind
+      const px = cx + (rx / depth) * f;
+      const py = cy + (-camera.pitch) * 200; // small pitch offset
+      // scale based on depth
+      const scale = Math.max(0.06, 1 / (0.12 * depth));
+      const size = Math.min(220, 120 * scale);
+      const alpha = Math.max(0, 1 - (depth / (room.radius*1.6)));
+      // draw image if available
+      if (sp.imgBitmap){
+        const iw = sp.imgBitmap.width, ih = sp.imgBitmap.height;
+        const aspect = iw/ih;
+        const wdraw = size * Math.min(1.8, aspect+0.2);
+        const hdraw = wdraw / Math.max(0.3, aspect);
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(sp.imgBitmap, px - wdraw/2, py - hdraw/2, wdraw, hdraw);
+        ctx.globalAlpha = 1;
+      } else {
+        // circle speaker marker
+        ctx.beginPath();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = sp.color;
+        ctx.ellipse(px, py, size*0.35, size*0.35, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = '#041224';
+        ctx.beginPath(); ctx.ellipse(px, py, size*0.12, size*0.12,0,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.font = `${Math.max(10, size*0.12)}px system-ui, Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(String(i+1), px, py);
+        ctx.globalAlpha = 1;
+      }
+      // distance label
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font='12px system-ui';
+      const d = Math.hypot(dx,dy);
+      ctx.fillText(`${d.toFixed(2)}m`, px, py + size*0.6);
+    }
+
+    // HUD text (bottom-left)
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(12, h-48, 220,36);
+    ctx.fillStyle = '#cfe7ff'; ctx.font='13px system-ui'; ctx.textAlign='left';
+    ctx.fillText(`pos: ${camera.x.toFixed(2)}, ${camera.y.toFixed(2)}`, 18, h-28);
+    ctx.fillText(`yaw: ${(camera.yaw*180/Math.PI).toFixed(0)}°`, 18, h-12);
+
+    // nearest indicator border or text
+    if (nearest.idx >= 0){
+      ctx.fillStyle = 'rgba(138,107,255,0.06)'; ctx.fillRect(w-160,12,148,44);
+      ctx.fillStyle = '#eaf1ff'; ctx.font='13px system-ui'; ctx.fillText(`Nearest: ${nearest.idx+1} — ${nearest.d.toFixed(2)} m`, w-148, 32);
+    }
+  }
+
+  // main loop
+  function loop(ts){
+    const now = ts || performance.now();
+    const dt = Math.min(0.05, (now - (lastTS||now))/1000);
+    lastTS = now;
+    moveCamera(dt);
+    let nearest = {idx:-1,d:Infinity};
+    if (audioCtx) nearest = updateAudioPositions();
+    renderScene(nearest);
+    hud.textContent = `x:${camera.x.toFixed(2)} y:${camera.y.toFixed(2)} yaw:${(camera.yaw*180/Math.PI).toFixed(0)} nearest:${nearest.idx>=0? nearest.idx+1+' ('+nearest.d.toFixed(2)+'m)':'—'}`;
+    requestAnimationFrame(loop);
+  }
+
+  // helper to create audio sources when files were loaded before start
+  function createAllSourcesIfNeeded(){
+    for (let i=0;i<NUM;i++) if (speakers[i].buffer && !speakers[i].source) createSource(i);
+  }
+
+  // start audio automatically if audio context exists
+  // expose debug method
+  window._debugCreateTestTones = function(){
+    ensureAudioCtx();
+    for (let i=0;i<NUM;i++){
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain(); gain.gain.value = 0;
+      const panner = audioCtx.createPanner(); panner.panningModel='HRTF'; panner.distanceModel='linear'; panner.refDistance=1; panner.maxDistance=100;
+      osc.type='sine'; osc.frequency.value = 110 + i*22;
+      osc.connect(gain); gain.connect(panner); panner.connect(masterGain);
+      osc.start();
+      speakers[i].source = osc; speakers[i].gainNode = gain; speakers[i].panner = panner;
+      speakers[i].x = Math.cos((i/NUM)*Math.PI*2 - Math.PI/2) * room.radius;
+      speakers[i].y = Math.sin((i/NUM)*Math.PI*2 - Math.PI/2) * room.radius;
+    }
+    started = true;
+    startBtn.disabled = true;
+    lastTS = performance.now();
+    requestAnimationFrame(loop);
+  };
+
+  // allow dropping files onto canvas to load into nearest speaker
+  canvas.addEventListener('dragover', e=>{ e.preventDefault(); });
+  canvas.addEventListener('drop', async (e)=> {
+    e.preventDefault();
+    const f = e.dataTransfer.files[0];
+    if (!f) return;
+    // find nearest speaker to camera forward point
+    const dropX = camera.x + Math.cos(camera.yaw)*2;
+    const dropY = camera.y + Math.sin(camera.yaw)*2;
+    let ni = 0, nd = Infinity;
+    for (let i=0;i<NUM;i++){
+      const d = Math.hypot(speakers[i].x - dropX, speakers[i].y - dropY);
+      if (d < nd){ nd=d; ni=i; }
+    }
+    if (f.type.startsWith('image/')) await loadImageFile(f, ni);
+    else if (f.type.startsWith('audio/')) await loadAudioFile(f, ni);
+  });
+
+  // initial render loop without audio until start
+  lastTS = performance.now();
+  requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
