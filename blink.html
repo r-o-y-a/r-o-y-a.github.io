@@ -6,29 +6,20 @@
 <title>Blink Squares — Local TFJS runtime (blink.html)</title>
 <style>
   :root{--bg:#fbfbfb;--muted:#666}
-  
-html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe 
-UI,Roboto,Helvetica,Arial;color:#111}
-  
-.wrap{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;color:#111}
+  .wrap{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;box-sizing:border-box}
   h1{margin:0;font-size:20px;font-weight:600}
   .squares{display:flex;gap:12px;align-items:center;justify-content:center}
-  
-.sq{width:92px;height:92px;border-radius:12px;background:#111;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;box-shadow:0 
-8px 20px rgba(12,12,12,.12);font-size:14px}
+  .sq{width:92px;height:92px;border-radius:12px;background:#111;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;box-shadow:0 8px 20px rgba(12,12,12,.12);font-size:14px}
   .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center}
-  #startBtn{padding:12px 
-18px;font-size:16px;border-radius:10px;border:0;background:#111;color:#fff;cursor:pointer}
+  #startBtn{padding:12px 18px;font-size:16px;border-radius:10px;border:0;background:#111;color:#fff;cursor:pointer}
   #status{font-size:13px;color:var(--muted);max-width:720px;text-align:center}
-  
-#errorBox{font-size:13px;color:#b00020;max-width:720px;text-align:left;white-space:pre-wrap}
+  #errorBox{font-size:13px;color:#b00020;max-width:720px;text-align:left;white-space:pre-wrap}
   #videoEl{display:none}
   canvas{display:none}
   .note{font-size:13px;color:var(--muted);max-width:640px;text-align:center}
-  @media (max-width:420px){ .sq{width:74px;height:74px;font-size:12px} 
-#startBtn{font-size:15px} }
-  
-#debugLog{font-family:monospace;font-size:12px;color:#222;max-width:720px;white-space:pre-wrap;text-align:left}
+  @media (max-width:420px){ .sq{width:74px;height:74px;font-size:12px} #startBtn{font-size:15px} }
+  #debugLog{font-family:monospace;font-size:12px;color:#222;max-width:720px;white-space:pre-wrap;text-align:left}
 </style>
 </head>
 <body>
@@ -43,16 +34,13 @@ UI,Roboto,Helvetica,Arial;color:#111}
 
   <div class="controls">
     <button id="startBtn">Start camera</button>
-    <div id="status">Click Start. This uses local files: <code>libs/tf.min.js</code> and 
-<code>libs/face-landmarks-detection.min.js</code>.</div>
+    <div id="status">Click Start. This uses local files: <code>libs/tf.min.js</code> and <code>libs/face-landmarks-detection.min.js</code>.</div>
   </div>
 
   <div id="errorBox" aria-live="polite"></div>
   <pre id="debugLog"></pre>
 
-  <p class="note">Place local libs at the repo paths: <code>libs/tf.min.js</code> and 
-<code>libs/face-landmarks-detection.min.js</code>. No mediapipe files required for this 
-build.</p>
+  <p class="note">Place local libs at the repo paths: <code>libs/tf.min.js</code> and <code>libs/face-landmarks-detection.min.js</code>. No mediapipe files required for this build.</p>
 
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="hiddenCanvas"></canvas>
@@ -80,8 +68,7 @@ const bothSq = document.getElementById('bothSq');
 const videoEl = document.getElementById('videoEl');
 const canvas = document.getElementById('hiddenCanvas');
 
-function log(...args){ debugLog.textContent += args.map(a => (typeof a === 'object' ? 
-JSON.stringify(a) : String(a))).join(' ') + '\n'; console.log(...args); }
+function log(...args){ debugLog.textContent += args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ') + '\n'; console.log(...args); }
 function setStatus(s){ statusEl.textContent = s; log('[STATUS]', s); }
 function setError(s){ errorBox.textContent = s; log('[ERROR]', s); }
 
@@ -95,13 +82,10 @@ showEvent('none');
 
 // Defensive presence checks
 if(!window.tf){
-  setError('Missing local file: libs/tf.min.js (window.tf not found). Place TensorFlow JS at 
-libs/tf.min.js');
+  setError('Missing local file: libs/tf.min.js (window.tf not found). Place TensorFlow JS at libs/tf.min.js');
 }
 if(!window.faceLandmarksDetection){
-  setError('Missing local file: libs/face-landmarks-detection.min.js 
-(window.faceLandmarksDetection not found). Place the face-landmarks-detection UMD at 
-libs/face-landmarks-detection.min.js');
+  setError('Missing local file: libs/face-landmarks-detection.min.js (window.faceLandmarksDetection not found). Place the face-landmarks-detection UMD at libs/face-landmarks-detection.min.js');
 }
 
 // state
@@ -110,14 +94,12 @@ let running = false;
 let closingLeft = false, closingRight = false;
 let EAR_THRESHOLD = 0.24;
 
-function bbox(points){ const xs = points.map(p=>p[0]), ys = points.map(p=>p[1]); return 
-{minX:Math.min(...xs), maxX:Math.max(...xs), minY:Math.min(...ys), maxY:Math.max(...ys)}; }
+function bbox(points){ const xs = points.map(p=>p[0]), ys = points.map(p=>p[1]); return {minX:Math.min(...xs), maxX:Math.max(...xs), minY:Math.min(...ys), maxY:Math.max(...ys)}; }
 
 async function requestCamera(){
   setError(''); setStatus('Requesting camera (user gesture)…');
   try{
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', 
-width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
     videoEl.srcObject = stream;
     await new Promise(r => videoEl.onloadedmetadata = r);
     canvas.width = videoEl.videoWidth || 640;
@@ -125,8 +107,7 @@ width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
     setStatus('Camera started');
     return stream;
   } catch(err){
-    setError('Camera error: ' + (err && err.name ? err.name + ' — ' + err.message : 
-String(err)));
+    setError('Camera error: ' + (err && err.name ? err.name + ' — ' + err.message : String(err)));
     throw err;
   }
 }
@@ -135,15 +116,13 @@ async function loadModelTFJS(){
   setStatus('Loading face-landmarks model (TFJS runtime)…');
   try{
     // Use TFJS runtime. SupportedPackages.mediapipeFacemesh works when runtime:'tfjs'
-    model = await 
-faceLandmarksDetection.load(faceLandmarksDetection.SupportedPackages.mediapipeFacemesh, {
+    model = await faceLandmarksDetection.load(faceLandmarksDetection.SupportedPackages.mediapipeFacemesh, {
       runtime: 'tfjs'
     });
     setStatus('Model loaded (TFJS) — detecting blinks/winks');
     return true;
   } catch(err){
-    setError('Model load failed (TFJS runtime). Error: ' + (err && err.message ? err.message 
-: String(err)));
+    setError('Model load failed (TFJS runtime). Error: ' + (err && err.message ? err.message : String(err)));
     console.error(err);
     throw err;
   }
@@ -154,14 +133,11 @@ async function detectLoop(){
   setStatus('Detecting — blink/wink will light the squares');
   while(running){
     try{
-      const faces = await model.estimateFaces({ input: videoEl, returnTensors: false, 
-flipHorizontal: true });
+      const faces = await model.estimateFaces({ input: videoEl, returnTensors: false, flipHorizontal: true });
       if(faces && faces.length){
         const f = faces[0];
-        const leftEye = (f.annotations.leftEyeUpper0 || 
-[]).concat(f.annotations.leftEyeLower0 || []);
-        const rightEye = (f.annotations.rightEyeUpper0 || 
-[]).concat(f.annotations.rightEyeLower0 || []);
+        const leftEye = (f.annotations.leftEyeUpper0 || []).concat(f.annotations.leftEyeLower0 || []);
+        const rightEye = (f.annotations.rightEyeUpper0 || []).concat(f.annotations.rightEyeLower0 || []);
         if(leftEye.length && rightEye.length){
           const L = bbox(leftEye), R = bbox(rightEye);
           const leftEAR = (L.maxY - L.minY) / (L.maxX - L.minX + 1e-6);
