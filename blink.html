@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Blink Squares — Start Fix v2 (blink.html)</title>
+<title>Blink Squares — Local TFJS runtime (blink.html)</title>
 <style>
   :root{--bg:#fbfbfb;--muted:#666}
   
@@ -43,33 +43,34 @@ UI,Roboto,Helvetica,Arial;color:#111}
 
   <div class="controls">
     <button id="startBtn">Start camera</button>
-    <div id="status">Click Start. If nothing happens check console or the debug log 
-below.</div>
+    <div id="status">Click Start. This uses local files: <code>libs/tf.min.js</code> and 
+<code>libs/face-landmarks-detection.min.js</code>.</div>
   </div>
 
   <div id="errorBox" aria-live="polite"></div>
-  <div id="debugLog"></div>
+  <pre id="debugLog"></pre>
 
-  <p class="note">Place local libs at: <code>libs/tf.min.js</code>, 
-<code>libs/face-landmarks-detection.min.js</code>, <code>libs/mediapipe/face_mesh.js</code>, 
-and the wasm files in <code>libs/mediapipe/</code>.</p>
+  <p class="note">Place local libs at the repo paths: <code>libs/tf.min.js</code> and 
+<code>libs/face-landmarks-detection.min.js</code>. No mediapipe files required for this 
+build.</p>
 
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="hiddenCanvas"></canvas>
 </div>
 
-<!-- Local libs (must be present in repo) -->
+<!-- Local libs must exist in these paths -->
 <script src="libs/tf.min.js"></script>
 <script src="libs/face-landmarks-detection.min.js"></script>
-<script src="libs/mediapipe/face_mesh.js"></script>
 
 <script>
-/* Robust Start v2:
-   - No inline onclick attributes (avoids ReferenceError race).
-   - startFlow is attached to window and bound to the button via addEventListener.
-   - Clear debug output and defensive checks for missing libs.
+/* blink.html — TFJS runtime version.
+   REQUIRED local files:
+     libs/tf.min.js
+     libs/face-landmarks-detection.min.js
+   This uses the TFJS backend (no mediapipe wasm required).
 */
 
+const startBtn = document.getElementById('startBtn');
 const statusEl = document.getElementById('status');
 const errorBox = document.getElementById('errorBox');
 const debugLog = document.getElementById('debugLog');
@@ -78,12 +79,11 @@ const rightSq = document.getElementById('rightSq');
 const bothSq = document.getElementById('bothSq');
 const videoEl = document.getElementById('videoEl');
 const canvas = document.getElementById('hiddenCanvas');
-const startBtn = document.getElementById('startBtn');
 
-function logDbg(...args){ const s = args.map(a=> (typeof a === 'object' ? JSON.stringify(a) : 
-String(a))).join(' '); debugLog.textContent += s + '\n'; console.log(...args); }
-function setStatus(s){ statusEl.textContent = s; logDbg('[STATUS]', s); }
-function setError(s){ errorBox.textContent = s; logDbg('[ERROR]', s); }
+function log(...args){ debugLog.textContent += args.map(a => (typeof a === 'object' ? 
+JSON.stringify(a) : String(a))).join(' ') + '\n'; console.log(...args); }
+function setStatus(s){ statusEl.textContent = s; log('[STATUS]', s); }
+function setError(s){ errorBox.textContent = s; log('[ERROR]', s); }
 
 function showEvent(ev){
   const COLORS = { none:'#111', left:'#ff6b6b', right:'#63c2ff', both:'#ffd36b' };
@@ -92,6 +92,17 @@ function showEvent(ev){
   bothSq.style.background = ev === 'both' ? COLORS.both : COLORS.none;
 }
 showEvent('none');
+
+// Defensive presence checks
+if(!window.tf){
+  setError('Missing local file: libs/tf.min.js (window.tf not found). Place TensorFlow JS at 
+libs/tf.min.js');
+}
+if(!window.faceLandmarksDetection){
+  setError('Missing local file: libs/face-landmarks-detection.min.js 
+(window.faceLandmarksDetection not found). Place the face-landmarks-detection UMD at 
+libs/face-landmarks-detection.min.js');
+}
 
 // state
 let model = null;
@@ -102,67 +113,44 @@ let EAR_THRESHOLD = 0.24;
 function bbox(points){ const xs = points.map(p=>p[0]), ys = points.map(p=>p[1]); return 
 {minX:Math.min(...xs), maxX:Math.max(...xs), minY:Math.min(...ys), maxY:Math.max(...ys)}; }
 
-// Expose startFlow globally and also bind after definition
-window.startFlow = async function startFlow(){
-  // immediate UI feedback to show click registered
-  setError(''); debugLog.textContent = ''; setStatus('Start pressed — checking libraries and 
-requesting camera...');
-
-  // quick presence checks
-  if(!window.tf){
-    setError('ERROR: TensorFlow (tf.min.js) not loaded. Check libs/tf.min.js is reachable.');
-    return;
-  }
-  if(!window.faceLandmarksDetection){
-    setError('ERROR: face-landmarks-detection not loaded. Check 
-libs/face-landmarks-detection.min.js is reachable.');
-    return;
-  }
-  logDbg('tf present:', !!window.tf, 'faceLandmarksDetection present:', 
-!!window.faceLandmarksDetection);
-
-  // request camera as direct user gesture
+async function requestCamera(){
+  setError(''); setStatus('Requesting camera (user gesture)…');
   try{
-    setStatus('Requesting camera (user gesture)…');
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-      audio: false
-    });
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', 
+width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
     videoEl.srcObject = stream;
     await new Promise(r => videoEl.onloadedmetadata = r);
-    canvas.width = videoEl.videoWidth || 640; canvas.height = videoEl.videoHeight || 480;
-    setStatus('Camera started — loading model (after camera)…');
+    canvas.width = videoEl.videoWidth || 640;
+    canvas.height = videoEl.videoHeight || 480;
+    setStatus('Camera started');
+    return stream;
   } catch(err){
     setError('Camera error: ' + (err && err.name ? err.name + ' — ' + err.message : 
 String(err)));
-    return;
+    throw err;
   }
+}
 
-  // load model now (point mediapipe assets to local folder)
+async function loadModelTFJS(){
+  setStatus('Loading face-landmarks model (TFJS runtime)…');
   try{
-    if(!window.faceLandmarksDetection){
-      setError('faceLandmarksDetection not available after camera.');
-      return;
-    }
+    // Use TFJS runtime. SupportedPackages.mediapipeFacemesh works when runtime:'tfjs'
     model = await 
 faceLandmarksDetection.load(faceLandmarksDetection.SupportedPackages.mediapipeFacemesh, {
-      runtime: 'mediapipe',
-      solutionPath: './libs/mediapipe/' // must contain face_mesh.js and wasm bins
+      runtime: 'tfjs'
     });
-    setStatus('Model loaded — detecting blinks/winks');
+    setStatus('Model loaded (TFJS) — detecting blinks/winks');
+    return true;
   } catch(err){
-    setError('Model load failed: ' + (err && err.message ? err.message : String(err)) + 
-'\nCheck console for fetch errors (wasm files).');
+    setError('Model load failed (TFJS runtime). Error: ' + (err && err.message ? err.message 
+: String(err)));
     console.error(err);
-    return;
+    throw err;
   }
-
-  // detection loop
-  running = true;
-  detectLoop();
-};
+}
 
 async function detectLoop(){
+  running = true;
   setStatus('Detecting — blink/wink will light the squares');
   while(running){
     try{
@@ -195,27 +183,42 @@ flipHorizontal: true });
         setStatus('No face detected — please face the camera');
       }
     } catch(err){
-      console.error('Detect error', err);
+      console.error('Detection error', err);
       setError('Detection error: ' + (err && err.message ? err.message : String(err)));
+      // continue loop
     }
     await new Promise(r => requestAnimationFrame(r));
   }
 }
 
-// Bind the button AFTER we've declared startFlow
-startBtn.addEventListener('click', () => {
-  // protect against multiple clicks
+// Main start handler
+startBtn.addEventListener('click', async () => {
+  // quick guard if missing libs
+  if(!window.tf || !window.faceLandmarksDetection){
+    setError('Missing required local libs. See top of page. Aborting start.');
+    return;
+  }
   startBtn.disabled = true;
-  // call global startFlow (ensures it's a user gesture)
-  Promise.resolve().then(() => window.startFlow()).catch(err => { setError('Start failed: ' + 
-err); console.error(err); startBtn.disabled = false; });
+  debugLog.textContent = '';
+  try{
+    await requestCamera();
+  } catch(e){
+    startBtn.disabled = false;
+    return;
+  }
+  try{
+    await loadModelTFJS();
+  } catch(e){
+    startBtn.disabled = false;
+    return;
+  }
+  detectLoop();
 });
 
-// small debug helpers
+// Expose small helpers in console
 window._blinkDemo = {
-  start: () => window.startFlow(),
   stop: () => { running = false; setStatus('Stopped'); },
-  setEAR: v => { EAR_THRESHOLD = Number(v); logDbg('EAR set to', EAR_THRESHOLD); }
+  setEAR: v => { EAR_THRESHOLD = Number(v); log('[DEBUG] EAR set to', EAR_THRESHOLD); }
 };
 </script>
 </body>
