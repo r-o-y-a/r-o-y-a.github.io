@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Cristal Rod — deviation particles</title>
+<title>Cristal Rod — WAV upload with particles</title>
 <style>
   :root{--bg:#0b0b0c;--rod-glow:#9fe1ff;--text:#e6eef6}
   html,body,*{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none;touch-action:none}
   html,body{height:100%;margin:0;background:var(--bg);overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto}
   .instructions{position:fixed;top:6px;left:6px;right:6px;z-index:50;color:var(--text);font-size:14px;text-align:center;pointer-events:none}
-  #uploadBtn{position:fixed;top:6px;right:6px;z-index:60;pointer-events:auto}
+  #uploadBtn{position:fixed;top:6px;right:6px;z-index:60;}
   #fileLabel{font-size:12px;color:#cfe9ff;margin-top:6px}
   input[type=file]{display:none}
   .stage{width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
@@ -30,13 +30,11 @@
 </style>
 </head>
 <body>
-  <div class="instructions" id="instr">Upload a WAV (top-right). Touch rod to play; wiggle to glitch — deviations release color particles.</div>
+  <div class="instructions" id="instr">Upload a WAV to play. Touch rod to start; wiggle to glitch — deviations release color particles.</div>
 
   <div id="uploadBtn">
-    <label style="display:inline-block">
-      <button id="btn">Upload WAV</button>
-      <input id="fileInput" type="file" accept=".wav,audio/*">
-    </label>
+    <button id="btn">Upload WAV</button>
+    <input id="fileInput" type="file" accept=".wav,audio/*">
     <div id="fileLabel"></div>
   </div>
 
@@ -108,10 +106,9 @@ function mapDevToParams(absDev){const d=Math.min(MAX_DEV_FOR_RATE,absDev);const 
 /* ---- particles ---- */
 function resizeCanvas(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
 window.addEventListener('resize',resizeCanvas);resizeCanvas();
-
 function spawnParticles(y,deviation){
   const t=Math.min(1,Math.abs(deviation)/MAX_DEV_FOR_RATE);
-  const hue=(1-t)*200 + t*0; // blue to red
+  const hue=(1-t)*200 + t*0;
   const color=`hsl(${hue},100%,60%)`;
   const count=Math.ceil(2+5*t);
   const rodRect=rod.getBoundingClientRect();
@@ -122,7 +119,7 @@ function spawnParticles(y,deviation){
       vx:(Math.random()-0.5)*(1+3*t),
       vy:(Math.random()-0.5)*(2+5*t),
       life:1,
-      color:color
+      color
     });
   }
 }
@@ -174,6 +171,7 @@ function onPointerMove(e){
 function onPointerUp(){active=false;stopPlayback();}
 
 /* file upload */
+document.getElementById('btn').addEventListener('click',()=>fileInput.click());
 fileInput.addEventListener('change',async(ev)=>{
   if(!ev.target.files||!ev.target.files[0])return;
   const f=ev.target.files[0];ensureAudioCtx();
@@ -197,7 +195,6 @@ rod.addEventListener('pointerdown',onPointerDown);
 window.addEventListener('pointermove',onPointerMove);
 window.addEventListener('pointerup',onPointerUp);
 
-document.getElementById('btn').addEventListener('click',()=>fileInput.click());
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&active)onPointerUp();});
 </script>
 </body>
