@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Blink Squares — MediaPipe FaceMesh (blink.html)</title>
+<title>Blink Squares — MediaPipe (use your hosted libs)</title>
 <style>
   :root{--bg:#fbfbfb;--muted:#666}
   html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;color:#111}
-  .wrap{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;box-sizing:border-box}
+  .wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;box-sizing:border-box}
   h1{margin:0;font-size:20px;font-weight:600}
   .squares{display:flex;gap:12px;align-items:center;justify-content:center}
   .sq{width:92px;height:92px;border-radius:12px;background:#111;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;box-shadow:0 8px 20px rgba(12,12,12,.12);font-size:14px}
@@ -18,45 +18,50 @@
   #videoEl{display:none}
   canvas{display:none}
   .note{font-size:13px;color:var(--muted);max-width:640px;text-align:center}
-  @media (max-width:420px){ .sq{width:74px;height:74px;font-size:12px} #startBtn{font-size:15px} }
   pre#debug{font-family:monospace;font-size:12px;color:#222;max-width:720px;white-space:pre-wrap;text-align:left}
+  @media (max-width:420px){ .sq{width:74px;height:74px;font-size:12px} #startBtn{font-size:15px} }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Blink Squares — Left / Right / Both (MediaPipe)</h1>
+  <h1>Blink Squares — Left / Right / Both (uses your hosted MediaPipe)</h1>
 
   <div class="squares" aria-hidden="true">
-    <div id="leftSq" class="sq" aria-label="left">LEFT</div>
-    <div id="bothSq" class="sq" aria-label="both">BOTH</div>
-    <div id="rightSq" class="sq" aria-label="right">RIGHT</div>
+    <div id="leftSq" class="sq">LEFT</div>
+    <div id="bothSq" class="sq">BOTH</div>
+    <div id="rightSq" class="sq">RIGHT</div>
   </div>
 
   <div class="controls">
     <button id="startBtn">Start camera</button>
-    <div id="status">Click Start. Required files (must be hosted locally): <code>libs/mediapipe/face_mesh.js</code> and the wasm files in the same folder.</div>
+    <div id="status">Click Start. This page expects your files at:
+      <br><code>/libs/face_mesh.js</code> and the wasm files at <code>/libs/mediapipe/</code>.</div>
   </div>
 
   <div id="errorBox" aria-live="polite"></div>
   <pre id="debug"></pre>
 
-  <p class="note">Place these files in your repo: <code>libs/mediapipe/face_mesh.js</code>, <code>libs/mediapipe/face_mesh_solution_wasm_bin.wasm</code>, <code>libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm</code>. Then open this page via GitHub Pages (HTTPS).</p>
+  <p class="note">Required (already hosted by you):<br>
+    <code>https://r-o-y-a.github.io/libs/face_mesh.js</code><br>
+    <code>https://r-o-y-a.github.io/libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm</code><br>
+    <code>https://r-o-y-a.github.io/libs/mediapipe/face_mesh_solution_wasm_bin.wasm</code>
+  </p>
 
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="hiddenCanvas"></canvas>
 </div>
 
 <script>
-/* blink.html — MediaPipe FaceMesh local-only version
-   REQUIRED files (exact paths relative to page):
-     libs/mediapipe/face_mesh.js
-     libs/mediapipe/face_mesh_solution_wasm_bin.wasm
-     libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm
-
+/* Final robust single-file implementation that uses the exact file locations you provided:
+   - face_mesh.js must be at /libs/face_mesh.js
+   - wasm files must be at /libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm and face_mesh_solution_wasm_bin.wasm
    Behavior:
-   - Start on user click -> request camera -> initialize FaceMesh with locateFile mapping -> run detection loop
-   - Detect left/right/both eye closures (EAR method) and show persistent colored square until next event
-   - Works on desktop/mobile Safari & Chrome assuming files are present and page served over HTTPS
+   - Click Start (user gesture) -> request camera -> load/instantiate FaceMesh (UMD or ESM) -> detection loop
+   - Shows colored square for last detected event: left / right / both
+   Notes:
+   - This implementation first attempts to load /libs/face_mesh.js via a script tag (UMD).
+     If no global is exposed, it attempts dynamic import('/libs/face_mesh.js') to support ESM builds.
+   - The locateFile mapper routes wasm requests to your /libs/mediapipe/ wasm filenames.
 */
 
 const startBtn = document.getElementById('startBtn');
@@ -67,9 +72,8 @@ const leftSq = document.getElementById('leftSq');
 const rightSq = document.getElementById('rightSq');
 const bothSq = document.getElementById('bothSq');
 const videoEl = document.getElementById('videoEl');
-const canvas = document.getElementById('hiddenCanvas');
 
-function log(...args){ debugEl.textContent += args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ') + '\n'; console.log(...args); }
+function log(...args){ debugEl.textContent += args.map(a => (typeof a==='object'?JSON.stringify(a):String(a))).join(' ') + '\n'; console.log(...args); }
 function setStatus(s){ statusEl.textContent = s; log('[STATUS]', s); }
 function setError(s){ errorBox.textContent = s; log('[ERROR]', s); }
 
@@ -81,117 +85,108 @@ function showEvent(ev){
 }
 showEvent('none');
 
-// Eye indices for MediaPipe FaceMesh (canonical)
+// MediaPipe FaceMesh canonical eye indices
 const LEFT_EYE_INDICES  = [33,160,158,133,153,144];
 const RIGHT_EYE_INDICES = [362,385,387,263,373,380];
 
-function toPoint(p){ if(Array.isArray(p)) return {x:p[0], y:p[1]}; return {x:p.x, y:p.y}; }
+function toPoint(p){ if(Array.isArray(p)) return {x:p[0], y:p[1]}; if(p==null) return {x:0,y:0}; return {x:p.x, y:p.y}; }
 function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
 function computeEAR(landmarks, idxs){
-  const p1 = toPoint(landmarks[idxs[0]]);
-  const p2 = toPoint(landmarks[idxs[1]]);
-  const p3 = toPoint(landmarks[idxs[2]]);
-  const p4 = toPoint(landmarks[idxs[3]]);
-  const p5 = toPoint(landmarks[idxs[4]]);
-  const p6 = toPoint(landmarks[idxs[5]]);
-  const A = dist(p2,p6);
-  const B = dist(p3,p5);
-  const C = dist(p1,p4) || 1e-6;
+  const p1 = toPoint(landmarks[idxs[0]]), p2 = toPoint(landmarks[idxs[1]]), p3 = toPoint(landmarks[idxs[2]]),
+        p4 = toPoint(landmarks[idxs[3]]), p5 = toPoint(landmarks[idxs[4]]), p6 = toPoint(landmarks[idxs[5]]);
+  const A = dist(p2,p6), B = dist(p3,p5), C = dist(p1,p4) || 1e-6;
   return (A + B) / (2 * C);
 }
 
-// detection state
-let running = false;
-let closingLeft = false, closingRight = false;
-let lastEvent = 'none';
-let EAR_THRESHOLD = 0.18; // starting value (tweak via console: window._blink.EAR=0.16)
-
-let faceMesh = null;
-
-// locateFile mapping: MediaPipe will request various asset filenames; map them to files you host.
-// We map anything containing "wasm" to the wasm binaries we asked you to host (two variants).
+// locateFile mapper: maps requested asset filenames to your hosted wasm files
 function locateFileMapper(file){
-  // if file name contains "simd" prefer simd binary
-  if(typeof file === 'string' && file.toLowerCase().includes('simd')) {
+  const lname = String(file).toLowerCase();
+  if(lname.includes('simd') && lname.includes('.wasm')) {
     return '/libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm';
   }
-  if(typeof file === 'string' && file.toLowerCase().includes('wasm')) {
+  if(lname.includes('.wasm')) {
     return '/libs/mediapipe/face_mesh_solution_wasm_bin.wasm';
   }
-  // default: map to the same basename in libs/mediapipe/
+  // otherwise map to mediapipe folder (many mediapipe builds request other helper files)
   return '/libs/mediapipe/' + file;
 }
 
-async function requestCamera(){
-  setError(''); setStatus('Requesting camera (tap allow)…');
+// main flow
+let faceMeshInstance = null;
+let running = false;
+let closingLeft = false, closingRight = false;
+let EAR_THRESHOLD = 0.18; // start conservative; adjust in console via window._blink.EAR = 0.16
+
+async function ensureFaceMeshClass(){
+  // Try to load /libs/face_mesh.js as script (UMD)
+  setStatus('Loading /libs/face_mesh.js (script tag) ...');
   try{
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-      audio: false
+    await new Promise((resolve, reject) => {
+      // if already loaded, resolve immediately
+      if(window.FaceMesh && typeof window.FaceMesh === 'function'){ resolve(); return; }
+      const existing = document.querySelector('script[data-our-facemesh]');
+      if(existing){ existing.addEventListener('load', ()=>resolve()); existing.addEventListener('error', ()=>reject(new Error('script load error'))); return; }
+      const s = document.createElement('script');
+      s.src = '/libs/face_mesh.js';
+      s.async = true;
+      s.setAttribute('data-our-facemesh','1');
+      s.onload = () => resolve();
+      s.onerror = (e) => reject(new Error('Failed to load /libs/face_mesh.js (script tag)'));
+      document.head.appendChild(s);
     });
-    videoEl.srcObject = stream;
-    await new Promise(r => videoEl.onloadedmetadata = r);
-    setStatus('Camera started');
-    return stream;
+    // check global
+    if(window.FaceMesh && typeof window.FaceMesh === 'function'){
+      log('FaceMesh found as global (UMD).');
+      return window.FaceMesh;
+    }
+    log('Script loaded but FaceMesh global not found; will try dynamic import (ESM).');
   } catch(err){
-    setError('Camera error: ' + (err && err.name ? err.name + ' — ' + err.message : String(err)));
-    throw err;
+    log('Script tag load failed:', err);
+    // continue to attempt dynamic import below
+  }
+
+  // Try dynamic import of ESM module (some builds are ESM)
+  setStatus('Trying dynamic import("/libs/face_mesh.js") ...');
+  try{
+    const mod = await import('/libs/face_mesh.js');
+    // try common export names
+    const candidates = [mod.default, mod.FaceMesh, mod.MPFaceMesh, mod.FaceMeshModule];
+    for(const c of candidates){
+      if(typeof c === 'function'){
+        log('FaceMesh class found via dynamic import.');
+        return c;
+      }
+    }
+    // if module itself is a function/class
+    if(typeof mod === 'function') return mod;
+    throw new Error('No FaceMesh export found in module');
+  } catch(err){
+    // final failure
+    throw new Error('Could not load FaceMesh class from /libs/face_mesh.js. Script tag and dynamic import failed or module has no FaceMesh export. See console for details.');
   }
 }
 
-// main initialization: assumes libs/mediapipe/face_mesh.js is reachable and defines FaceMesh global
-async function initFaceMeshAndRun(){
-  if(typeof FaceMesh !== 'function'){
-    setError('face_mesh.js not found or did not define FaceMesh. Ensure libs/mediapipe/face_mesh.js is present and accessible.');
-    return false;
-  }
-
+async function initFaceMesh(ClassFaceMesh){
+  setStatus('Initializing FaceMesh instance (pointing wasm requests to /libs/mediapipe/) ...');
   try{
-    setStatus('Initializing MediaPipe FaceMesh — loading runtime assets from ./libs/mediapipe/ ...');
-    faceMesh = new FaceMesh({
+    // Construct with locateFile mapping
+    faceMeshInstance = new ClassFaceMesh({
       locateFile: (file) => locateFileMapper(file)
     });
 
-    faceMesh.setOptions({
+    faceMeshInstance.setOptions({
       maxNumFaces: 1,
       refineLandmarks: true,
       minDetectionConfidence: 0.5,
       minTrackingConfidence: 0.5
     });
 
-    faceMesh.onResults(onFaceMeshResults);
-
-    // start send loop
-    running = true;
-    detectLoopWithFaceMesh();
+    faceMeshInstance.onResults(onFaceMeshResults);
+    setStatus('FaceMesh initialized.');
     return true;
   } catch(err){
-    setError('FaceMesh initialization error: ' + (err && err.message ? err.message : String(err)));
-    console.error(err);
-    return false;
-  }
-}
-
-async function detectLoopWithFaceMesh(){
-  setStatus('Detecting — blink/wink will light the squares');
-  try{
-    while(running){
-      if(videoEl.readyState >= 2){
-        try{
-          await faceMesh.send({image: videoEl});
-        } catch(e){
-          console.error('faceMesh.send error', e);
-          setError('FaceMesh runtime error: ' + (e && e.message ? e.message : String(e)) + '\nCheck that wasm files are present in libs/mediapipe/ and accessible.');
-          running = false;
-          break;
-        }
-      }
-      await new Promise(r => requestAnimationFrame(r));
-    }
-  } catch(err){
-    console.error('FaceMesh loop error', err);
-    setError('FaceMesh loop error: ' + (err && err.message ? err.message : String(err)));
-    running = false;
+    console.error('FaceMesh init error', err);
+    throw err;
   }
 }
 
@@ -200,7 +195,7 @@ function onFaceMeshResults(results){
     setStatus('No face detected — please face the camera');
     return;
   }
-  const lm = results.multiFaceLandmarks[0]; // array of {x,y,z}
+  const lm = results.multiFaceLandmarks[0];
   processLandmarks(lm);
 }
 
@@ -210,45 +205,90 @@ function processLandmarks(landmarks){
     const rightEAR = computeEAR(landmarks, RIGHT_EYE_INDICES);
     const leftClosed = leftEAR < EAR_THRESHOLD;
     const rightClosed = rightEAR < EAR_THRESHOLD;
-
     if(leftClosed) closingLeft = true;
     if(rightClosed) closingRight = true;
-
     if(!leftClosed && !rightClosed && (closingLeft || closingRight)){
-      if(closingLeft && closingRight) lastEvent = 'both';
-      else if(closingLeft) lastEvent = 'left';
-      else if(closingRight) lastEvent = 'right';
-      else lastEvent = 'both';
-      showEvent(lastEvent);
-      setStatus('Detected: ' + lastEvent.toUpperCase() + `  (L:${leftEAR.toFixed(3)} R:${rightEAR.toFixed(3)})`);
+      let ev = 'both';
+      if(closingLeft && !closingRight) ev = 'left';
+      else if(closingRight && !closingLeft) ev = 'right';
+      showEvent(ev);
+      setStatus('Detected: ' + ev.toUpperCase() + `  (L:${leftEAR.toFixed(3)} R:${rightEAR.toFixed(3)})`);
       closingLeft = closingRight = false;
     } else {
-      // update small debug EAR values
       setStatus(`EAR L:${leftEAR.toFixed(3)} R:${rightEAR.toFixed(3)}`);
     }
-  } catch(err){
-    console.error('processLandmarks error', err);
+  } catch(e){
+    console.error('processLandmarks error', e);
   }
 }
 
-// start flow handler
+async function detectLoop(){
+  setStatus('Starting detection loop (sending video frames to FaceMesh)...');
+  running = true;
+  try{
+    while(running){
+      if(videoEl.readyState >= 2){
+        try{
+          await faceMeshInstance.send({image: videoEl});
+        } catch(e){
+          console.error('faceMesh.send error', e);
+          setError('FaceMesh runtime send() error: ' + (e && e.message ? e.message : String(e)) + '\nCheck wasm files at /libs/mediapipe/');
+          running = false;
+          break;
+        }
+      }
+      await new Promise(r => requestAnimationFrame(r));
+    }
+  } catch(err){
+    console.error('detectLoop error', err);
+    setError('Detection loop error: ' + (err && err.message ? err.message : String(err)));
+  }
+}
+
+// Start button handler
 startBtn.addEventListener('click', async () => {
   startBtn.disabled = true;
   setError(''); debugEl.textContent = '';
   setStatus('Start pressed — requesting camera (user gesture)...');
 
+  // Request camera on user gesture
   try{
-    await requestCamera();
-  } catch(e){
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+    videoEl.srcObject = stream;
+    await new Promise(r => (videoEl.onloadedmetadata = r));
+    setStatus('Camera started — now loading FaceMesh code...');
+  } catch(err){
+    setError('Camera error: ' + (err && err.name ? err.name + ' — ' + err.message : String(err)));
     startBtn.disabled = false;
     return;
   }
 
-  const ok = await initFaceMeshAndRun();
-  if(!ok) startBtn.disabled = false;
+  // Load face_mesh.js (your file at /libs/face_mesh.js) and locate FaceMesh class
+  let FaceMeshClass = null;
+  try{
+    FaceMeshClass = await ensureFaceMeshClass();
+    if(!FaceMeshClass) throw new Error('FaceMesh class not found after loading /libs/face_mesh.js');
+  } catch(err){
+    setError(err.message || String(err));
+    startBtn.disabled = false;
+    return;
+  }
+
+  // Initialize instance and start loop
+  try{
+    await initFaceMesh(FaceMeshClass);
+    await detectLoop();
+  } catch(err){
+    setError('Initialization failed: ' + (err && err.message ? err.message : String(err)));
+    startBtn.disabled = false;
+    return;
+  }
 });
 
-// small console helpers
+// expose debug helpers
 window._blink = {
   stop: () => { running = false; setStatus('Stopped'); },
   EAR: (v) => { EAR_THRESHOLD = Number(v); log('EAR set to', EAR_THRESHOLD); }
