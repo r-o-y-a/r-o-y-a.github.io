@@ -3,297 +3,221 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Play the Cristal — synth default (upload overrides)</title>
+<title>Cristal rod</title>
 <style>
   :root{--bg:#0b0b0c;--rod-glow:#9fe1ff;--text:#e6eef6}
-  /* Disable selection/drag/callout */
-  html,body,*{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none;touch-action:none}
-  html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto}
+  html,body,*{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none}
+  html,body{height:100%;margin:0;background:var(--bg);overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto}
   .instructions{position:fixed;top:6px;left:6px;right:6px;z-index:50;color:var(--text);font-size:14px;text-align:center;pointer-events:none}
-  #uploadBtn{position:fixed;top:6px;right:6px;z-index:60;pointer-events:auto}
+  #uploadBtn{position:fixed;top:6px;right:6px;z-index:60;text-align:right}
   #fileLabel{font-size:12px;color:#cfe9ff;margin-top:6px}
   input[type=file]{display:none}
-  .stage{box-sizing:border-box;width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative}
-  .rod{
-    width:8mm;
-    height:100vh;
-    max-height:100vh;
-    border-radius:6px;
-    background:linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
-    box-shadow:0 8px 30px rgba(0,0,0,0.6), inset 0 0 18px rgba(255,255,255,0.02);
-    display:flex;align-items:center;justify-content:center;
-    transition:box-shadow 120ms, transform 120ms;
-    -webkit-tap-highlight-color: transparent;
-    pointer-events:auto;
-    touch-action:none;
-  }
+  label.upload-label{display:inline-block;padding:6px 12px;background:#1b1b1d;color:#e6eef6;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:14px}
+  label.upload-label:hover{background:#2b2b2f}
+  .stage{width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+  .rod{width:8mm;height:100vh;border-radius:6px;background:linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02));
+        box-shadow:0 8px 30px rgba(0,0,0,0.6),inset 0 0 18px rgba(255,255,255,0.02);
+        display:flex;align-items:center;justify-content:center;
+        transition:box-shadow 120ms,transform 120ms;-webkit-tap-highlight-color:transparent;pointer-events:auto;touch-action:none;position:relative;z-index:10}
   .rod.playing{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 28px var(--rod-glow),inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.01)}
   .rod.glitch{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 40px #ff9fa0,inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.03) rotate(-0.2deg)}
   .hairline{width:60%;height:2px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent);border-radius:2px;opacity:0.9}
-  button{pointer-events:auto}
+  canvas#particles{position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;pointer-events:none}
 </style>
 </head>
 <body>
-  <div class="instructions" id="instr">Default synth (A≈220.25Hz). Upload a WAV (top-right) to override. Touch rod to play; wiggle to glitch.</div>
+<div class="instructions" id="instr">Upload a WAV, then touch the rod to play. Smooth movement keeps it pure; rough motion distorts it.</div>
 
-  <div id="uploadBtn">
-    <label style="display:inline-block">
-      <button id="btn">Upload WAV</button>
-      <input id="fileInput" type="file" accept=".wav,audio/*">
-    </label>
-    <div id="fileLabel"></div>
-  </div>
+<div id="uploadBtn">
+  <label class="upload-label">
+    <input id="fileInput" type="file" accept=".wav,audio/*">
+    <span>Upload WAV</span>
+  </label>
+  <div id="fileLabel"></div>
+</div>
 
-  <div class="stage">
-    <div id="rod" class="rod" role="button" aria-label="Glass rod">
-      <div class="hairline"></div>
-    </div>
-  </div>
+<div class="stage">
+  <canvas id="particles"></canvas>
+  <div id="rod" class="rod" role="button"><div class="hairline"></div></div>
+</div>
 
 <script>
-/* ======= CONFIG ======= */
-const SMOOTH_ALPHA = 0.18, DEV_THRESHOLD_PX = 8, DEV_PERSIST = 3, MAX_DEV_FOR_RATE = 80,
-      STUTTER_RATE_MIN = 6, STUTTER_RATE_MAX = 22, STUTTER_DUTY = 0.5;
-// Default synth base frequency (using user's cristal A3 reference ~220.25 Hz)
-const DEFAULT_FREQ = 220.25;
-/* ====================== */
+/* ===== CONFIG ===== */
+const MAX_ACCEL = 60;            // higher = less sensitive
+const MAX_VELOCITY = 70;
+const PRESSURE_SENSITIVITY = 1.2;
+/* ================== */
 
-let audioCtx = null;
-let buffer = null;          // if user uploads WAV
-let usingSynth = true;      // true when no buffer is present
-let src = null;             // BufferSource if playing WAV
-// synth nodes
-let osc1 = null, osc2 = null, synthGain = null;
+let audioCtx=null, buffer=null, src=null,
+    distortion=null, filter=null, masterGain=null,
+    active=false, lastY=null, lastVelocity=0,
+    velocity=0, acceleration=0, pressure=0,
+    glitching=false;
 
-let distortion = null, filter = null, chopGain = null, masterGain = null;
-let stutterTimer = null;
+const rod=document.getElementById('rod'),
+      fileInput=document.getElementById('fileInput'),
+      fileLabel=document.getElementById('fileLabel'),
+      instr=document.getElementById('instr'),
+      canvas=document.getElementById('particles'),
+      ctx=canvas.getContext('2d');
 
-let active = false, trendY = null, devCounter = 0, glitching = false, lastY = null;
+let particles=[];
 
-const rod = document.getElementById('rod');
-const fileInput = document.getElementById('fileInput');
-const fileLabel = document.getElementById('fileLabel');
-const instr = document.getElementById('instr');
+/* --- Particle visuals --- */
+function resizeCanvas(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
+window.addEventListener('resize',resizeCanvas);resizeCanvas();
 
-function ensureAudioCtx(){ if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
-
-function makeDistortion(amount=0){
-  const ws = audioCtx.createWaveShaper();
-  const k = Math.max(0, Math.min(1000, amount * 400));
-  const n=2048; const curve=new Float32Array(n);
-  for(let i=0;i<n;i++){const x=(i/(n-1))*2-1; curve[i]=(1+k)*x/(1+k*Math.abs(x));}
-  ws.curve = curve; ws.oversample='2x'; return ws;
-}
-
-/* Start playback: buffer if available, otherwise synth */
-function startPlayback(){
-  if (!audioCtx) return;
-  // common nodes: distortion -> filter -> chopGain -> masterGain -> dest
-  distortion = makeDistortion(0.0);
-  filter = audioCtx.createBiquadFilter(); filter.type='lowpass'; filter.frequency.value=12000; filter.Q.value=0.7;
-  chopGain = audioCtx.createGain(); chopGain.gain.value = 1;
-  masterGain = audioCtx.createGain(); masterGain.gain.value = 0.95;
-
-  // connect common chain to destination
-  distortion.connect(filter);
-  filter.connect(chopGain);
-  chopGain.connect(masterGain);
-  masterGain.connect(audioCtx.destination);
-
-  if (buffer && !usingSynth){
-    // play uploaded WAV
-    src = audioCtx.createBufferSource();
-    src.buffer = buffer;
-    src.loop = true;
-    // connect src -> distortion
-    src.connect(distortion);
-    src.start();
-  } else {
-    // build simple synth:
-    // osc1 = primary sine, osc2 = harmonic / detuned for richness
-    osc1 = audioCtx.createOscillator();
-    osc2 = audioCtx.createOscillator();
-    // create a small harmonic/partial: second oscillator = 2x freq but detuned a little
-    osc1.type = 'sine';
-    osc2.type = 'sine';
-    osc1.frequency.value = DEFAULT_FREQ;
-    osc2.frequency.value = DEFAULT_FREQ * 2; // harmonic
-    osc2.detune.value = -6; // slight detune for beating
-    // synth gain controls combined level
-    synthGain = audioCtx.createGain(); synthGain.gain.value = 0.6;
-    // chain: osc1 + osc2 -> synthGain -> distortion -> ...
-    osc1.connect(synthGain);
-    osc2.connect(synthGain);
-    synthGain.connect(distortion);
-    // start oscillators
-    osc1.start();
-    osc2.start();
-  }
-  rod.classList.add('playing');
-}
-
-/* Stop playback / cleanup nodes */
-function stopPlayback(){
-  // stop buffer source
-  try{ if (src){ src.stop(0); src.disconnect(); } }catch(e){}
-  src = null;
-  // stop synth oscillators
-  try{ if (osc1){ osc1.stop(0); osc1.disconnect(); } }catch(e){}
-  try{ if (osc2){ osc2.stop(0); osc2.disconnect(); } }catch(e){}
-  osc1 = null; osc2 = null;
-  if (synthGain){ try{ synthGain.disconnect(); }catch(e){} synthGain = null; }
-
-  // clear stutter & reset audio graph pieces
-  clearStutter();
-  distortion = null; filter = null; chopGain = null; masterGain = null;
-
-  glitching = false; devCounter = 0; lastY = null; trendY = null;
-  rod.classList.remove('playing'); rod.classList.remove('glitch');
-}
-
-/* Glitch: increase distortion & start stutter; works for synth and buffer */
-function engageGlitch(rateHz, strength){
-  if (glitching) return;
-  glitching = true;
-  rod.classList.add('glitch');
-  // set distortion strength and lower filter cutoff based on strength
-  if (distortion) distortion.curve = makeDistortion(strength).curve;
-  if (filter) filter.frequency.setTargetAtTime(4000 + (1-strength)*8000, audioCtx.currentTime, 0.04);
-  // start stutter (toggling chopGain)
-  startStutter(rateHz);
-}
-
-function clearGlitch(){
-  if (!glitching) return;
-  glitching = false;
-  rod.classList.remove('glitch');
-  if (distortion) distortion.curve = makeDistortion(0).curve;
-  if (filter) filter.frequency.setTargetAtTime(12000, audioCtx.currentTime, 0.06);
-  clearStutter();
-}
-
-/* Stutter implementation via toggling chopGain */
-function startStutter(rateHz){
-  clearStutter();
-  if (!chopGain) return;
-  const periodMs = 1000 / rateHz;
-  let on = true;
-  chopGain.gain.setValueAtTime(1, audioCtx.currentTime);
-  stutterTimer = setInterval(()=>{
-    on = !on;
-    // faster timing uses setValueAtTime to minimize jitter effect
-    chopGain.gain.setValueAtTime(on ? 1 : 0, audioCtx.currentTime);
-  }, periodMs * STUTTER_DUTY);
-}
-
-function clearStutter(){
-  if (stutterTimer){ clearInterval(stutterTimer); stutterTimer = null; }
-  if (chopGain) chopGain.gain.setValueAtTime(1, audioCtx ? audioCtx.currentTime : 0);
-}
-
-function mapDevToParams(absDev){
-  const d = Math.min(MAX_DEV_FOR_RATE, absDev);
-  const t = d / MAX_DEV_FOR_RATE;
-  const rate = STUTTER_RATE_MIN + t * (STUTTER_RATE_MAX - STUTTER_RATE_MIN);
-  return { rateHz: rate, strength: t };
-}
-
-/* POINTER / TOUCH HANDLING */
-function onPointerDown(e){
-  e.preventDefault();
-  ensureAudioCtx();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  // usingSynth is true when no uploaded buffer exists
-  usingSynth = !buffer;
-
-  // when no buffer and using synth, we can start immediately
-  active = true;
-  const y = e.clientY ?? (e.touches && e.touches[0] && e.touches[0].clientY);
-  trendY = y; lastY = y; devCounter = 0; glitching = false;
-  startPlayback();
-
-  if (e.pointerId && rod.setPointerCapture) {
-    try{ rod.setPointerCapture(e.pointerId); }catch(o){}
+function spawnParticles(y,accel,press){
+  const accelNorm=Math.min(1,Math.abs(accel)/MAX_ACCEL);
+  const hue=(1-accelNorm)*200+accelNorm*0; // blue→red
+  const color=`hsl(${hue},100%,60%)`;
+  const count=Math.ceil(1+3*accelNorm+2*press);
+  const rodRect=rod.getBoundingClientRect();
+  for(let i=0;i<count;i++){
+    particles.push({
+      x:rodRect.left+rodRect.width/2+(Math.random()-0.5)*4,
+      y:y+(Math.random()-0.5)*8,
+      vx:(Math.random()-0.5)*(1+2*accelNorm),
+      vy:(Math.random()-0.5)*(1+3*accelNorm),
+      life:1,color
+    });
   }
 }
-
-function onPointerMove(e){
-  if (!active) return;
-  const y = e.clientY ?? (e.touches && e.touches[0] && e.touches[0].clientY);
-  if (y == null) return;
-  trendY += SMOOTH_ALPHA * (y - trendY);
-  const deviation = y - trendY, absDev = Math.abs(deviation);
-
-  if (absDev > DEV_THRESHOLD_PX) devCounter = Math.min(DEV_PERSIST + 10, devCounter + 1);
-  else devCounter = Math.max(0, devCounter - 1);
-
-  if (devCounter >= DEV_PERSIST && !glitching){
-    const p = mapDevToParams(absDev);
-    engageGlitch(p.rateHz, p.strength);
-  } else if (glitching && devCounter < 1){
-    clearGlitch();
-  } else if (glitching){
-    // update stutter & distortion dynamically
-    const p = mapDevToParams(absDev);
-    if (stutterTimer) startStutter(p.rateHz);
-    if (distortion) distortion.curve = makeDistortion(p.strength).curve;
-    if (filter) filter.frequency.setTargetAtTime(4000 + (1-p.strength)*8000, audioCtx.currentTime, 0.03);
-  }
-
-  lastY = y;
-}
-
-function onPointerUp(e){
-  active = false;
-  stopPlayback();
-  if (e.pointerId && rod.releasePointerCapture) {
-    try{ rod.releasePointerCapture(e.pointerId); }catch(o){}
+function updateParticles(dt){
+  particles=particles.filter(p=>p.life>0);
+  for(let p of particles){
+    p.x+=p.vx*dt*60;p.y+=p.vy*dt*60;p.life-=dt*0.9;
   }
 }
+function drawParticles(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(let p of particles){
+    ctx.globalAlpha=Math.max(0,p.life);
+    ctx.fillStyle=p.color;
+    ctx.fillRect(p.x,p.y,2,2);
+  }
+  ctx.globalAlpha=1;
+}
+let lastT=performance.now();
+function animate(t){
+  const dt=(t-lastT)/1000;lastT=t;
+  updateParticles(dt);drawParticles();
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
 
-/* FILE UPLOAD HANDLING (upload overrides synth) */
-fileInput.addEventListener('change', async (ev)=>{
-  if (!ev.target.files || !ev.target.files[0]) return;
-  const f = ev.target.files[0];
-  await loadFile(f);
-});
-
+/* --- Audio functions --- */
+function ensureAudioCtx(){
+  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+}
 async function loadFile(file){
   ensureAudioCtx();
-  try{
-    const ab = await file.arrayBuffer();
-    // decode audio (promise-style; works in modern browsers)
-    buffer = await audioCtx.decodeAudioData(ab);
-    fileLabel.textContent = file.name;
-    usingSynth = !buffer;
-    instr.textContent = 'Uploaded: ' + file.name;
-  }catch(err){
-    console.warn('Failed to load file:', err);
-    instr.textContent = 'Error decoding WAV — try another file.';
-    buffer = null;
-    usingSynth = true;
+  const ab=await file.arrayBuffer();
+  buffer=await audioCtx.decodeAudioData(ab);
+  fileLabel.textContent=file.name;
+}
+function makeDistortion(amount=0){
+  const ws=audioCtx.createWaveShaper();
+  const k=Math.max(0,Math.min(1000,amount*300));
+  const n=2048,curve=new Float32Array(n);
+  for(let i=0;i<n;i++){
+    const x=(i/(n-1))*2-1;
+    curve[i]=(1+k)*x/(1+k*Math.abs(x));
   }
+  ws.curve=curve;ws.oversample='2x';
+  return ws;
+}
+function startPlayback(){
+  if(!audioCtx||!buffer)return;
+  stopPlayback();
+  distortion=makeDistortion(0);
+  filter=audioCtx.createBiquadFilter();
+  filter.type='lowpass';filter.frequency.value=12000;filter.Q.value=0.7;
+  masterGain=audioCtx.createGain();masterGain.gain.value=0.9;
+  src=audioCtx.createBufferSource();src.buffer=buffer;src.loop=true;
+  src.connect(distortion);distortion.connect(filter);filter.connect(masterGain);masterGain.connect(audioCtx.destination);
+  src.start();
+  rod.classList.add('playing');
+}
+function stopPlayback(){
+  if(src){try{src.stop(0);}catch{};try{src.disconnect();}catch{};}
+  src=null;
+  if(distortion)try{distortion.disconnect();}catch{};distortion=null;
+  if(filter)try{filter.disconnect();}catch{};filter=null;
+  if(masterGain)try{masterGain.disconnect();}catch{};masterGain=null;
+  glitching=false;
+  rod.classList.remove('playing');rod.classList.remove('glitch');
 }
 
-/* drag-drop onto rod */
-rod.addEventListener('dragover', (e)=>{ e.preventDefault(); rod.style.opacity = 0.9; });
-rod.addEventListener('dragleave', ()=>{ rod.style.opacity = ''; });
-rod.addEventListener('drop', async (e)=>{ e.preventDefault(); rod.style.opacity = ''; const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) await loadFile(f); });
+/* --- Parameter mapping --- */
+function mapParams(v,a,p){
+  const vn=Math.min(1,Math.abs(v)/MAX_VELOCITY);
+  const an=Math.min(1,Math.abs(a)/MAX_ACCEL);
+  const bright=2000+vn*9000;
+  const dist=an*0.4;
+  const amp=0.4+p*PRESSURE_SENSITIVITY;
+  return{bright,dist,amp,an};
+}
 
-/* pointer & touch listeners */
-rod.addEventListener('pointerdown', onPointerDown);
-window.addEventListener('pointermove', onPointerMove);
-window.addEventListener('pointerup', onPointerUp);
-rod.addEventListener('touchstart', (ev)=>onPointerDown(ev.changedTouches[0]));
-window.addEventListener('touchmove', (ev)=>onPointerMove(ev.changedTouches[0]), {passive:false});
-window.addEventListener('touchend', (ev)=>onPointerUp(ev.changedTouches[0]));
-window.addEventListener('touchcancel', (ev)=>onPointerUp(ev.changedTouches[0]));
+/* --- Gesture handling --- */
+function onDown(e){
+  e.preventDefault();
+  ensureAudioCtx();
+  if(audioCtx.state==='suspended')audioCtx.resume();
+  if(!buffer){instr.textContent='Please upload a WAV first.';return;}
+  active=true;
+  const t=e.touches?e.touches[0]:e;
+  lastY=t.clientY;lastVelocity=0;pressure=t.force||0.5;
+  startPlayback();
+}
+function onMove(e){
+  if(!active)return;
+  const t=e.touches?e.touches[0]:e;
+  const y=t.clientY,f=t.force||0.5;
+  velocity=y-lastY;
+  acceleration=velocity-lastVelocity;
+  pressure=f;
+  const p=mapParams(velocity,acceleration,pressure);
 
-/* open file dialog when pressing button */
-document.getElementById('btn').addEventListener('click', ()=>fileInput.click());
+  if(filter)filter.frequency.setTargetAtTime(p.bright*(1-pressure*0.2),audioCtx.currentTime,0.05);
+  if(distortion)distortion.curve=makeDistortion(p.dist).curve;
+  if(masterGain)masterGain.gain.setTargetAtTime(p.amp,audioCtx.currentTime,0.05);
 
-/* stop sound if page hidden */
-document.addEventListener('visibilitychange', ()=>{ if (document.hidden && active) onPointerUp({}); });
+  if(Math.abs(acceleration)>10)spawnParticles(y,acceleration,pressure);
+
+  if(p.an>0.6&&!glitching){
+    glitching=true;rod.classList.add('glitch');
+  }else if(p.an<0.3&&glitching){
+    glitching=false;rod.classList.remove('glitch');
+  }
+
+  lastVelocity=velocity;lastY=y;
+}
+function onUp(){
+  if(active){active=false;stopPlayback();}
+}
+
+/* --- File + drag --- */
+fileInput.addEventListener('change',async ev=>{
+  if(ev.target.files&&ev.target.files[0])await loadFile(ev.target.files[0]);
+});
+rod.addEventListener('dragover',e=>{e.preventDefault();rod.style.opacity=0.9;});
+rod.addEventListener('dragleave',()=>rod.style.opacity='');
+rod.addEventListener('drop',async e=>{
+  e.preventDefault();rod.style.opacity='';
+  const f=e.dataTransfer.files[0];if(f)await loadFile(f);
+});
+
+/* --- Listeners --- */
+rod.addEventListener('touchstart',onDown,{passive:false});
+window.addEventListener('touchmove',onMove,{passive:false});
+window.addEventListener('touchend',onUp,{passive:false});
+window.addEventListener('touchcancel',onUp,{passive:false});
+rod.addEventListener('pointerdown',onDown);
+window.addEventListener('pointermove',onMove);
+window.addEventListener('pointerup',onUp);
+
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&active)onUp();});
 </script>
 </body>
 </html>
