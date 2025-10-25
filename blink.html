@@ -10,21 +10,20 @@
   .wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;box-sizing:border-box}
   h1{margin:0;font-size:20px;font-weight:600}
   .squares{display:flex;gap:12px;align-items:center;justify-content:center}
-  .sq{width:92px;height:92px;border-radius:12px;background:#111;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;box-shadow:0 8px 20px rgba(12,12,12,.12);font-size:14px}
+  .sq{width:92px;height:92px;border-radius:12px;background:#111;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;box-shadow:0 8px 20px rgba(12,12,12,.12);font-size:14px;transition:background-color .14s ease, transform .14s ease}
+  .sq.flash{transform:translateY(-6px) scale(1.03); box-shadow:0 18px 34px rgba(12,12,12,.18)}
   .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center}
   #startBtn{padding:12px 18px;font-size:16px;border-radius:10px;border:0;background:#111;color:#fff;cursor:pointer}
-  #status{font-size:13px;color:var(--muted);max-width:720px;text-align:center}
-  #errorBox{font-size:13px;color:#b00020;max-width:720px;text-align:left;white-space:pre-wrap}
+  /* hide the noisy UI elements (you said you only wanted to see the buttons now) */
+  #status, #errorBox, pre#debug, .note { display:none !important; }
   #videoEl{display:none}
   canvas{display:none}
-  .note{font-size:13px;color:var(--muted);max-width:640px;text-align:center}
-  pre#debug{font-family:monospace;font-size:12px;color:#222;max-width:720px;white-space:pre-wrap;text-align:left}
   @media (max-width:420px){ .sq{width:74px;height:74px;font-size:12px} #startBtn{font-size:15px} }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Blink Squares — Left / Right / Both (uses your hosted MediaPipe)</h1>
+  <h1>Blink Squares — Left / Right / Both</h1>
 
   <div class="squares" aria-hidden="true">
     <div id="leftSq" class="sq">LEFT</div>
@@ -34,56 +33,57 @@
 
   <div class="controls">
     <button id="startBtn">Start camera</button>
-    <div id="status">Click Start. This page expects your files at:
-      <br><code>/libs/face_mesh.js</code> and the wasm files at <code>/libs/mediapipe/</code>.</div>
   </div>
 
   <div id="errorBox" aria-live="polite"></div>
   <pre id="debug"></pre>
-
-  <p class="note">Required (already hosted by you):<br>
-    <code>https://r-o-y-a.github.io/libs/face_mesh.js</code><br>
-    <code>https://r-o-y-a.github.io/libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm</code><br>
-    <code>https://r-o-y-a.github.io/libs/mediapipe/face_mesh_solution_wasm_bin.wasm</code>
-  </p>
 
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="hiddenCanvas"></canvas>
 </div>
 
 <script>
-/* Final robust single-file implementation that uses the exact file locations you provided:
-   - face_mesh.js must be at /libs/face_mesh.js
-   - wasm files must be at /libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm and face_mesh_solution_wasm_bin.wasm
-   Behavior:
-   - Click Start (user gesture) -> request camera -> load/instantiate FaceMesh (UMD or ESM) -> detection loop
-   - Shows colored square for last detected event: left / right / both
-   Notes:
-   - This implementation first attempts to load /libs/face_mesh.js via a script tag (UMD).
-     If no global is exposed, it attempts dynamic import('/libs/face_mesh.js') to support ESM builds.
-   - The locateFile mapper routes wasm requests to your /libs/mediapipe/ wasm filenames.
+/* Updated:
+   - flashes appropriate box briefly (left, right, or both)
+   - removed noisy on-page logging and hidden status/debug UI
+   - still attempts to load your /libs/face_mesh.js and wasm files
 */
 
 const startBtn = document.getElementById('startBtn');
-const statusEl = document.getElementById('status');
 const errorBox = document.getElementById('errorBox');
-const debugEl = document.getElementById('debug');
 const leftSq = document.getElementById('leftSq');
 const rightSq = document.getElementById('rightSq');
 const bothSq = document.getElementById('bothSq');
 const videoEl = document.getElementById('videoEl');
 
-function log(...args){ debugEl.textContent += args.map(a => (typeof a==='object'?JSON.stringify(a):String(a))).join(' ') + '\n'; console.log(...args); }
-function setStatus(s){ statusEl.textContent = s; log('[STATUS]', s); }
-function setError(s){ errorBox.textContent = s; log('[ERROR]', s); }
+// NO-OP status/error handlers (UI for them is hidden)
+function setStatus(_) {}
+function setError(_) { /* intentionally empty */ }
+
+// Flash helper
+const COLORS = { none:'#111', left:'#ff6b6b', right:'#63c2ff', both:'#ffd36b' };
+const flashTimeouts = new WeakMap();
+function flashElement(el, color, ms = 260){
+  if(!el) return;
+  // clear existing timeout
+  const prevT = flashTimeouts.get(el);
+  if(prevT) clearTimeout(prevT);
+  // apply
+  el.style.background = color;
+  el.classList.add('flash');
+  const t = setTimeout(() => {
+    el.style.background = ''; // revert to CSS default
+    el.classList.remove('flash');
+    flashTimeouts.delete(el);
+  }, ms);
+  flashTimeouts.set(el, t);
+}
 
 function showEvent(ev){
-  const COLORS = { none:'#111', left:'#ff6b6b', right:'#63c2ff', both:'#ffd36b' };
-  leftSq.style.background = ev === 'left' ? COLORS.left : COLORS.none;
-  rightSq.style.background = ev === 'right' ? COLORS.right : COLORS.none;
-  bothSq.style.background = ev === 'both' ? COLORS.both : COLORS.none;
+  if(ev === 'left')      flashElement(leftSq, COLORS.left);
+  else if(ev === 'right') flashElement(rightSq, COLORS.right);
+  else if(ev === 'both')  flashElement(bothSq, COLORS.both);
 }
-showEvent('none');
 
 // MediaPipe FaceMesh canonical eye indices
 const LEFT_EYE_INDICES  = [33,160,158,133,153,144];
@@ -107,7 +107,6 @@ function locateFileMapper(file){
   if(lname.includes('.wasm')) {
     return '/libs/mediapipe/face_mesh_solution_wasm_bin.wasm';
   }
-  // otherwise map to mediapipe folder (many mediapipe builds request other helper files)
   return '/libs/mediapipe/' + file;
 }
 
@@ -115,84 +114,60 @@ function locateFileMapper(file){
 let faceMeshInstance = null;
 let running = false;
 let closingLeft = false, closingRight = false;
-let EAR_THRESHOLD = 0.18; // start conservative; adjust in console via window._blink.EAR = 0.16
+let EAR_THRESHOLD = 0.18;
 
+// Try to find/load FaceMesh (UMD script or dynamic import ESM)
 async function ensureFaceMeshClass(){
-  // Try to load /libs/face_mesh.js as script (UMD)
-  setStatus('Loading /libs/face_mesh.js (script tag) ...');
+  setStatus('loading');
+  // try script tag load first
   try{
-    await new Promise((resolve, reject) => {
-      // if already loaded, resolve immediately
-      if(window.FaceMesh && typeof window.FaceMesh === 'function'){ resolve(); return; }
-      const existing = document.querySelector('script[data-our-facemesh]');
-      if(existing){ existing.addEventListener('load', ()=>resolve()); existing.addEventListener('error', ()=>reject(new Error('script load error'))); return; }
-      const s = document.createElement('script');
-      s.src = '/libs/face_mesh.js';
-      s.async = true;
-      s.setAttribute('data-our-facemesh','1');
-      s.onload = () => resolve();
-      s.onerror = (e) => reject(new Error('Failed to load /libs/face_mesh.js (script tag)'));
-      document.head.appendChild(s);
-    });
-    // check global
-    if(window.FaceMesh && typeof window.FaceMesh === 'function'){
-      log('FaceMesh found as global (UMD).');
-      return window.FaceMesh;
+    if(window.FaceMesh && typeof window.FaceMesh === 'function') return window.FaceMesh;
+    const existing = document.querySelector('script[data-our-facemesh]');
+    if(!existing){
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = '/libs/face_mesh.js';
+        s.async = true;
+        s.setAttribute('data-our-facemesh','1');
+        s.onload = () => resolve();
+        s.onerror = () => reject(new Error('script load failed'));
+        document.head.appendChild(s);
+      });
+      if(window.FaceMesh && typeof window.FaceMesh === 'function') return window.FaceMesh;
+    } else {
+      // existing script present but no global yet -> fall through to import attempt
     }
-    log('Script loaded but FaceMesh global not found; will try dynamic import (ESM).');
-  } catch(err){
-    log('Script tag load failed:', err);
-    // continue to attempt dynamic import below
+  } catch(e){
+    // fall through to dynamic import
   }
 
-  // Try dynamic import of ESM module (some builds are ESM)
-  setStatus('Trying dynamic import("/libs/face_mesh.js") ...');
+  // dynamic import (ESM)
   try{
     const mod = await import('/libs/face_mesh.js');
-    // try common export names
     const candidates = [mod.default, mod.FaceMesh, mod.MPFaceMesh, mod.FaceMeshModule];
-    for(const c of candidates){
-      if(typeof c === 'function'){
-        log('FaceMesh class found via dynamic import.');
-        return c;
-      }
-    }
-    // if module itself is a function/class
+    for(const c of candidates) if(typeof c === 'function') return c;
     if(typeof mod === 'function') return mod;
     throw new Error('No FaceMesh export found in module');
   } catch(err){
-    // final failure
-    throw new Error('Could not load FaceMesh class from /libs/face_mesh.js. Script tag and dynamic import failed or module has no FaceMesh export. See console for details.');
+    throw new Error('Could not load FaceMesh class from /libs/face_mesh.js. Ensure file and wasm files are at /libs/mediapipe/');
   }
 }
 
 async function initFaceMesh(ClassFaceMesh){
-  setStatus('Initializing FaceMesh instance (pointing wasm requests to /libs/mediapipe/) ...');
-  try{
-    // Construct with locateFile mapping
-    faceMeshInstance = new ClassFaceMesh({
-      locateFile: (file) => locateFileMapper(file)
-    });
-
-    faceMeshInstance.setOptions({
-      maxNumFaces: 1,
-      refineLandmarks: true,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
-
-    faceMeshInstance.onResults(onFaceMeshResults);
-    setStatus('FaceMesh initialized.');
-    return true;
-  } catch(err){
-    console.error('FaceMesh init error', err);
-    throw err;
-  }
+  setStatus('init');
+  faceMeshInstance = new ClassFaceMesh({ locateFile: (file) => locateFileMapper(file) });
+  faceMeshInstance.setOptions({
+    maxNumFaces: 1,
+    refineLandmarks: true,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+  faceMeshInstance.onResults(onFaceMeshResults);
 }
 
 function onFaceMeshResults(results){
   if(!results || !results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0){
-    setStatus('No face detected — please face the camera');
+    // no face visible
     return;
   }
   const lm = results.multiFaceLandmarks[0];
@@ -211,28 +186,26 @@ function processLandmarks(landmarks){
       let ev = 'both';
       if(closingLeft && !closingRight) ev = 'left';
       else if(closingRight && !closingLeft) ev = 'right';
-      showEvent(ev);
-      setStatus('Detected: ' + ev.toUpperCase() + `  (L:${leftEAR.toFixed(3)} R:${rightEAR.toFixed(3)})`);
+      showEvent(ev); // flash the appropriate box
       closingLeft = closingRight = false;
     } else {
-      setStatus(`EAR L:${leftEAR.toFixed(3)} R:${rightEAR.toFixed(3)}`);
+      // ongoing EAR monitoring (no visible UI updates; debug hidden)
     }
   } catch(e){
+    // swallow; console only for hard errors
     console.error('processLandmarks error', e);
   }
 }
 
 async function detectLoop(){
-  setStatus('Starting detection loop (sending video frames to FaceMesh)...');
   running = true;
   try{
     while(running){
-      if(videoEl.readyState >= 2){
+      if(videoEl.readyState >= 2 && faceMeshInstance){
         try{
           await faceMeshInstance.send({image: videoEl});
         } catch(e){
-          console.error('faceMesh.send error', e);
-          setError('FaceMesh runtime send() error: ' + (e && e.message ? e.message : String(e)) + '\nCheck wasm files at /libs/mediapipe/');
+          setError('FaceMesh runtime send() error. Check wasm files.');
           running = false;
           break;
         }
@@ -240,16 +213,15 @@ async function detectLoop(){
       await new Promise(r => requestAnimationFrame(r));
     }
   } catch(err){
-    console.error('detectLoop error', err);
-    setError('Detection loop error: ' + (err && err.message ? err.message : String(err)));
+    setError('Detection loop error.');
   }
 }
 
 // Start button handler
 startBtn.addEventListener('click', async () => {
   startBtn.disabled = true;
-  setError(''); debugEl.textContent = '';
-  setStatus('Start pressed — requesting camera (user gesture)...');
+  setError('');
+  setStatus('starting');
 
   // Request camera on user gesture
   try{
@@ -259,9 +231,8 @@ startBtn.addEventListener('click', async () => {
     });
     videoEl.srcObject = stream;
     await new Promise(r => (videoEl.onloadedmetadata = r));
-    setStatus('Camera started — now loading FaceMesh code...');
   } catch(err){
-    setError('Camera error: ' + (err && err.name ? err.name + ' — ' + err.message : String(err)));
+    setError('Camera error');
     startBtn.disabled = false;
     return;
   }
@@ -270,9 +241,9 @@ startBtn.addEventListener('click', async () => {
   let FaceMeshClass = null;
   try{
     FaceMeshClass = await ensureFaceMeshClass();
-    if(!FaceMeshClass) throw new Error('FaceMesh class not found after loading /libs/face_mesh.js');
+    if(!FaceMeshClass) throw new Error('FaceMesh class not found after loading');
   } catch(err){
-    setError(err.message || String(err));
+    setError('FaceMesh load error');
     startBtn.disabled = false;
     return;
   }
@@ -282,16 +253,16 @@ startBtn.addEventListener('click', async () => {
     await initFaceMesh(FaceMeshClass);
     await detectLoop();
   } catch(err){
-    setError('Initialization failed: ' + (err && err.message ? err.message : String(err)));
+    setError('Initialization failed');
     startBtn.disabled = false;
     return;
   }
 });
 
-// expose debug helpers
+// expose minimal debug helpers (no noisy logging)
 window._blink = {
-  stop: () => { running = false; setStatus('Stopped'); },
-  EAR: (v) => { EAR_THRESHOLD = Number(v); log('EAR set to', EAR_THRESHOLD); }
+  stop: () => { running = false; setStatus('stopped'); },
+  EAR: (v) => { EAR_THRESHOLD = Number(v); }
 };
 </script>
 </body>
