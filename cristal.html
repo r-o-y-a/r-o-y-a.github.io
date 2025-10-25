@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Play the Cristal — synth default (upload overrides)</title>
+<title>Cristal — synth default (upload overrides) — fixed touch</title>
 <style>
   :root{--bg:#0b0b0c;--rod-glow:#9fe1ff;--text:#e6eef6}
   /* Disable selection/drag/callout */
@@ -15,17 +15,11 @@
   input[type=file]{display:none}
   .stage{box-sizing:border-box;width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative}
   .rod{
-    width:8mm;
-    height:100vh;
-    max-height:100vh;
-    border-radius:6px;
+    width:8mm;height:100vh;max-height:100vh;border-radius:6px;
     background:linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
     box-shadow:0 8px 30px rgba(0,0,0,0.6), inset 0 0 18px rgba(255,255,255,0.02);
-    display:flex;align-items:center;justify-content:center;
-    transition:box-shadow 120ms, transform 120ms;
-    -webkit-tap-highlight-color: transparent;
-    pointer-events:auto;
-    touch-action:none;
+    display:flex;align-items:center;justify-content:center;transition:box-shadow 120ms, transform 120ms;
+    -webkit-tap-highlight-color: transparent;pointer-events:auto;touch-action:none;
   }
   .rod.playing{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 28px var(--rod-glow),inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.01)}
   .rod.glitch{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 40px #ff9fa0,inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.03) rotate(-0.2deg)}
@@ -34,7 +28,7 @@
 </style>
 </head>
 <body>
-  <div class="instructions" id="instr">Default synth (A≈220.25Hz). Upload a WAV (top-right) to override. Touch rod to play; wiggle to glitch.</div>
+  <div class="instructions" id="instr">Default synth (A≈220.25Hz). Upload WAV (top-right) to override. Touch rod to play; wiggle to glitch.</div>
 
   <div id="uploadBtn">
     <label style="display:inline-block">
@@ -54,16 +48,15 @@
 /* ======= CONFIG ======= */
 const SMOOTH_ALPHA = 0.18, DEV_THRESHOLD_PX = 8, DEV_PERSIST = 3, MAX_DEV_FOR_RATE = 80,
       STUTTER_RATE_MIN = 6, STUTTER_RATE_MAX = 22, STUTTER_DUTY = 0.5;
-// Default synth base frequency (using user's cristal A3 reference ~220.25 Hz)
-const DEFAULT_FREQ = 220.25;
+const DEFAULT_FREQ = 220.25; // A3 from your cristal tuning
 /* ====================== */
 
 let audioCtx = null;
-let buffer = null;          // if user uploads WAV
-let usingSynth = true;      // true when no buffer is present
+let buffer = null;          // uploaded WAV
+let usingSynth = true;
+
 let src = null;             // BufferSource if playing WAV
-// synth nodes
-let osc1 = null, osc2 = null, synthGain = null;
+let osc1 = null, osc2 = null, synthGain = null; // synth nodes
 
 let distortion = null, filter = null, chopGain = null, masterGain = null;
 let stutterTimer = null;
@@ -85,81 +78,67 @@ function makeDistortion(amount=0){
   ws.curve = curve; ws.oversample='2x'; return ws;
 }
 
-/* Start playback: buffer if available, otherwise synth */
 function startPlayback(){
   if (!audioCtx) return;
-  // common nodes: distortion -> filter -> chopGain -> masterGain -> dest
+  // create common chain
   distortion = makeDistortion(0.0);
   filter = audioCtx.createBiquadFilter(); filter.type='lowpass'; filter.frequency.value=12000; filter.Q.value=0.7;
   chopGain = audioCtx.createGain(); chopGain.gain.value = 1;
   masterGain = audioCtx.createGain(); masterGain.gain.value = 0.95;
-
-  // connect common chain to destination
+  // connect common chain
   distortion.connect(filter);
   filter.connect(chopGain);
   chopGain.connect(masterGain);
   masterGain.connect(audioCtx.destination);
 
-  if (buffer && !usingSynth){
+  if (!usingSynth && buffer){
     // play uploaded WAV
     src = audioCtx.createBufferSource();
     src.buffer = buffer;
     src.loop = true;
-    // connect src -> distortion
     src.connect(distortion);
     src.start();
   } else {
-    // build simple synth:
-    // osc1 = primary sine, osc2 = harmonic / detuned for richness
+    // start synth
     osc1 = audioCtx.createOscillator();
     osc2 = audioCtx.createOscillator();
-    // create a small harmonic/partial: second oscillator = 2x freq but detuned a little
-    osc1.type = 'sine';
-    osc2.type = 'sine';
+    osc1.type = 'sine'; osc2.type = 'sine';
     osc1.frequency.value = DEFAULT_FREQ;
-    osc2.frequency.value = DEFAULT_FREQ * 2; // harmonic
-    osc2.detune.value = -6; // slight detune for beating
-    // synth gain controls combined level
+    osc2.frequency.value = DEFAULT_FREQ * 2;
+    osc2.detune.value = -6;
     synthGain = audioCtx.createGain(); synthGain.gain.value = 0.6;
-    // chain: osc1 + osc2 -> synthGain -> distortion -> ...
-    osc1.connect(synthGain);
-    osc2.connect(synthGain);
+    osc1.connect(synthGain); osc2.connect(synthGain);
     synthGain.connect(distortion);
-    // start oscillators
-    osc1.start();
-    osc2.start();
+    osc1.start(); osc2.start();
   }
   rod.classList.add('playing');
 }
 
-/* Stop playback / cleanup nodes */
 function stopPlayback(){
-  // stop buffer source
   try{ if (src){ src.stop(0); src.disconnect(); } }catch(e){}
   src = null;
-  // stop synth oscillators
   try{ if (osc1){ osc1.stop(0); osc1.disconnect(); } }catch(e){}
   try{ if (osc2){ osc2.stop(0); osc2.disconnect(); } }catch(e){}
   osc1 = null; osc2 = null;
-  if (synthGain){ try{ synthGain.disconnect(); }catch(e){} synthGain = null; }
+  try{ if (synthGain) synthGain.disconnect(); }catch(e){} synthGain = null;
 
-  // clear stutter & reset audio graph pieces
   clearStutter();
-  distortion = null; filter = null; chopGain = null; masterGain = null;
+  // disconnect common chain
+  try{ if (distortion) distortion.disconnect(); }catch(e){} distortion = null;
+  try{ if (filter) filter.disconnect(); }catch(e){} filter = null;
+  try{ if (chopGain) chopGain.disconnect(); }catch(e){} chopGain = null;
+  try{ if (masterGain) masterGain.disconnect(); }catch(e){} masterGain = null;
 
   glitching = false; devCounter = 0; lastY = null; trendY = null;
   rod.classList.remove('playing'); rod.classList.remove('glitch');
 }
 
-/* Glitch: increase distortion & start stutter; works for synth and buffer */
 function engageGlitch(rateHz, strength){
   if (glitching) return;
   glitching = true;
   rod.classList.add('glitch');
-  // set distortion strength and lower filter cutoff based on strength
   if (distortion) distortion.curve = makeDistortion(strength).curve;
   if (filter) filter.frequency.setTargetAtTime(4000 + (1-strength)*8000, audioCtx.currentTime, 0.04);
-  // start stutter (toggling chopGain)
   startStutter(rateHz);
 }
 
@@ -172,7 +151,6 @@ function clearGlitch(){
   clearStutter();
 }
 
-/* Stutter implementation via toggling chopGain */
 function startStutter(rateHz){
   clearStutter();
   if (!chopGain) return;
@@ -181,14 +159,13 @@ function startStutter(rateHz){
   chopGain.gain.setValueAtTime(1, audioCtx.currentTime);
   stutterTimer = setInterval(()=>{
     on = !on;
-    // faster timing uses setValueAtTime to minimize jitter effect
-    chopGain.gain.setValueAtTime(on ? 1 : 0, audioCtx.currentTime);
+    try{ chopGain.gain.setValueAtTime(on ? 1 : 0, audioCtx.currentTime); }catch(e){}
   }, periodMs * STUTTER_DUTY);
 }
 
 function clearStutter(){
   if (stutterTimer){ clearInterval(stutterTimer); stutterTimer = null; }
-  if (chopGain) chopGain.gain.setValueAtTime(1, audioCtx ? audioCtx.currentTime : 0);
+  if (chopGain) try{ chopGain.gain.setValueAtTime(1, audioCtx.currentTime); }catch(e){}
 }
 
 function mapDevToParams(absDev){
@@ -198,71 +175,106 @@ function mapDevToParams(absDev){
   return { rateHz: rate, strength: t };
 }
 
-/* POINTER / TOUCH HANDLING */
-function onPointerDown(e){
-  e.preventDefault();
-  ensureAudioCtx();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  // usingSynth is true when no uploaded buffer exists
-  usingSynth = !buffer;
+/* --------- POINTER / TOUCH HANDLERS (robust) --------- */
+function normalizedPrevent(e){
+  try{ if (e && typeof e.preventDefault === 'function') e.preventDefault(); }catch(e){}
+}
 
-  // when no buffer and using synth, we can start immediately
+function onPointerDown(e){
+  normalizedPrevent(e);
+  ensureAudioCtx();
+  try{ if (audioCtx.state === 'suspended') audioCtx.resume(); }catch(e){}
+  usingSynth = !buffer;
+  if (!usingSynth && !buffer){
+    instr.textContent = 'Upload WAV or use synth default.';
+    return;
+  }
   active = true;
-  const y = e.clientY ?? (e.touches && e.touches[0] && e.touches[0].clientY);
+  const y = (e && (e.clientY !== undefined)) ? e.clientY : (e && e.touches && e.touches[0] && e.touches[0].clientY);
   trendY = y; lastY = y; devCounter = 0; glitching = false;
   startPlayback();
-
-  if (e.pointerId && rod.setPointerCapture) {
+  if (e && e.pointerId && rod.setPointerCapture){
     try{ rod.setPointerCapture(e.pointerId); }catch(o){}
   }
 }
 
 function onPointerMove(e){
   if (!active) return;
-  const y = e.clientY ?? (e.touches && e.touches[0] && e.touches[0].clientY);
+  const y = (e && (e.clientY !== undefined)) ? e.clientY : (e && e.touches && e.touches[0] && e.touches[0].clientY);
   if (y == null) return;
   trendY += SMOOTH_ALPHA * (y - trendY);
   const deviation = y - trendY, absDev = Math.abs(deviation);
-
   if (absDev > DEV_THRESHOLD_PX) devCounter = Math.min(DEV_PERSIST + 10, devCounter + 1);
   else devCounter = Math.max(0, devCounter - 1);
 
   if (devCounter >= DEV_PERSIST && !glitching){
-    const p = mapDevToParams(absDev);
-    engageGlitch(p.rateHz, p.strength);
+    const p = mapDevToParams(absDev); engageGlitch(p.rateHz, p.strength);
   } else if (glitching && devCounter < 1){
     clearGlitch();
   } else if (glitching){
-    // update stutter & distortion dynamically
     const p = mapDevToParams(absDev);
     if (stutterTimer) startStutter(p.rateHz);
     if (distortion) distortion.curve = makeDistortion(p.strength).curve;
     if (filter) filter.frequency.setTargetAtTime(4000 + (1-p.strength)*8000, audioCtx.currentTime, 0.03);
   }
-
   lastY = y;
 }
 
 function onPointerUp(e){
+  normalizedPrevent(e);
   active = false;
   stopPlayback();
-  if (e.pointerId && rod.releasePointerCapture) {
+  if (e && e.pointerId && rod.releasePointerCapture){
     try{ rod.releasePointerCapture(e.pointerId); }catch(o){}
   }
 }
 
-/* FILE UPLOAD HANDLING (upload overrides synth) */
+/* ---------- Touch wrappers (fixes mobile issues) ---------- */
+/* These call preventDefault on the real TouchEvent and pass a small object
+   into the existing handlers so the handlers don't break. */
+rod.addEventListener('touchstart', (ev) => {
+  ev.preventDefault();
+  const t = ev.changedTouches[0];
+  onPointerDown({
+    clientY: t ? t.clientY : undefined,
+    pointerId: undefined,
+    preventDefault: ()=>{}
+  });
+}, { passive:false });
+
+window.addEventListener('touchmove', (ev) => {
+  ev.preventDefault();
+  const t = ev.touches[0];
+  onPointerMove({
+    clientY: t ? t.clientY : undefined
+  });
+}, { passive:false });
+
+window.addEventListener('touchend', (ev) => {
+  ev.preventDefault();
+  onPointerUp({ pointerId: undefined });
+}, { passive:false });
+
+window.addEventListener('touchcancel', (ev) => {
+  ev.preventDefault();
+  onPointerUp({});
+}, { passive:false });
+
+/* ---------- Pointer & mouse events ---------- */
+rod.addEventListener('pointerdown', onPointerDown);
+window.addEventListener('pointermove', onPointerMove);
+window.addEventListener('pointerup', onPointerUp);
+
+/* ---------- File upload / drag-drop ---------- */
 fileInput.addEventListener('change', async (ev)=>{
   if (!ev.target.files || !ev.target.files[0]) return;
-  const f = ev.target.files[0];
-  await loadFile(f);
+  await loadFile(ev.target.files[0]);
 });
 
 async function loadFile(file){
   ensureAudioCtx();
   try{
     const ab = await file.arrayBuffer();
-    // decode audio (promise-style; works in modern browsers)
     buffer = await audioCtx.decodeAudioData(ab);
     fileLabel.textContent = file.name;
     usingSynth = !buffer;
@@ -275,24 +287,12 @@ async function loadFile(file){
   }
 }
 
-/* drag-drop onto rod */
 rod.addEventListener('dragover', (e)=>{ e.preventDefault(); rod.style.opacity = 0.9; });
 rod.addEventListener('dragleave', ()=>{ rod.style.opacity = ''; });
-rod.addEventListener('drop', async (e)=>{ e.preventDefault(); rod.style.opacity = ''; const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) await loadFile(f); });
+rod.addEventListener('drop', async (e)=>{ e.preventDefault(); rod.style.opacity = ''; const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) await loadFile(f); });
 
-/* pointer & touch listeners */
-rod.addEventListener('pointerdown', onPointerDown);
-window.addEventListener('pointermove', onPointerMove);
-window.addEventListener('pointerup', onPointerUp);
-rod.addEventListener('touchstart', (ev)=>onPointerDown(ev.changedTouches[0]));
-window.addEventListener('touchmove', (ev)=>onPointerMove(ev.changedTouches[0]), {passive:false});
-window.addEventListener('touchend', (ev)=>onPointerUp(ev.changedTouches[0]));
-window.addEventListener('touchcancel', (ev)=>onPointerUp(ev.changedTouches[0]));
-
-/* open file dialog when pressing button */
+/* ---------- UI helpers ---------- */
 document.getElementById('btn').addEventListener('click', ()=>fileInput.click());
-
-/* stop sound if page hidden */
 document.addEventListener('visibilitychange', ()=>{ if (document.hidden && active) onPointerUp({}); });
 </script>
 </body>
