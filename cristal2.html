@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Cristal Rod — deviation particles</title>
+<style>
+  :root{--bg:#0b0b0c;--rod-glow:#9fe1ff;--text:#e6eef6}
+  html,body,*{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none;touch-action:none}
+  html,body{height:100%;margin:0;background:var(--bg);overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto}
+  .instructions{position:fixed;top:6px;left:6px;right:6px;z-index:50;color:var(--text);font-size:14px;text-align:center;pointer-events:none}
+  #uploadBtn{position:fixed;top:6px;right:6px;z-index:60;pointer-events:auto}
+  #fileLabel{font-size:12px;color:#cfe9ff;margin-top:6px}
+  input[type=file]{display:none}
+  .stage{width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+  .rod{
+    width:8mm;height:100vh;border-radius:6px;
+    background:linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02));
+    box-shadow:0 8px 30px rgba(0,0,0,0.6),inset 0 0 18px rgba(255,255,255,0.02);
+    display:flex;align-items:center;justify-content:center;
+    transition:box-shadow 120ms,transform 120ms;
+    -webkit-tap-highlight-color:transparent;pointer-events:auto;touch-action:none;
+    position:relative;z-index:10;
+  }
+  .rod.playing{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 28px var(--rod-glow),inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.01)}
+  .rod.glitch{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 40px #ff9fa0,inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.03) rotate(-0.2deg)}
+  .hairline{width:60%;height:2px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent);border-radius:2px;opacity:0.9}
+  canvas#particles{position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;pointer-events:none;}
+  button{pointer-events:auto}
+</style>
+</head>
+<body>
+  <div class="instructions" id="instr">Upload a WAV (top-right). Touch rod to play; wiggle to glitch — deviations release color particles.</div>
+
+  <div id="uploadBtn">
+    <label style="display:inline-block">
+      <button id="btn">Upload WAV</button>
+      <input id="fileInput" type="file" accept=".wav,audio/*">
+    </label>
+    <div id="fileLabel"></div>
+  </div>
+
+  <div class="stage">
+    <canvas id="particles"></canvas>
+    <div id="rod" class="rod" role="button" aria-label="Glass rod">
+      <div class="hairline"></div>
+    </div>
+  </div>
+
+<script>
+/* ===== CONFIG ===== */
+const SMOOTH_ALPHA = 0.18, DEV_THRESHOLD_PX = 8, DEV_PERSIST = 3, MAX_DEV_FOR_RATE = 80,
+      STUTTER_RATE_MIN = 6, STUTTER_RATE_MAX = 22, STUTTER_DUTY = 0.5;
+/* ================== */
+
+let audioCtx=null, buffer=null, src=null;
+let distortion=null, filter=null, chopGain=null, masterGain=null;
+let stutterTimer=null, active=false, trendY=null, devCounter=0, glitching=false, lastY=null;
+
+const rod=document.getElementById('rod');
+const fileInput=document.getElementById('fileInput');
+const fileLabel=document.getElementById('fileLabel');
+const instr=document.getElementById('instr');
+const canvas=document.getElementById('particles');
+const ctx=canvas.getContext('2d');
+let particles=[];
+
+function ensureAudioCtx(){ if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)(); }
+function makeDistortion(amount=0){const ws=audioCtx.createWaveShaper();const k=Math.max(0,Math.min(1000,amount*400));const n=2048;const curve=new Float32Array(n);for(let i=0;i<n;i++){const x=(i/(n-1))*2-1;curve[i]=(1+k)*x/(1+k*Math.abs(x));}ws.curve=curve;ws.oversample='2x';return ws;}
+function startPlayback(){
+  if(!audioCtx||!buffer)return;
+  distortion=makeDistortion(0.0);
+  filter=audioCtx.createBiquadFilter();filter.type='lowpass';filter.frequency.value=12000;filter.Q.value=0.7;
+  chopGain=audioCtx.createGain();chopGain.gain.value=1;
+  masterGain=audioCtx.createGain();masterGain.gain.value=0.95;
+  distortion.connect(filter);filter.connect(chopGain);chopGain.connect(masterGain);masterGain.connect(audioCtx.destination);
+  src=audioCtx.createBufferSource();src.buffer=buffer;src.loop=true;src.connect(distortion);src.start();
+  rod.classList.add('playing');
+}
+function stopPlayback(){
+  try{if(src){src.stop(0);src.disconnect();}}catch(e){}
+  src=null;clearStutter();
+  [distortion,filter,chopGain,masterGain].forEach(n=>{if(n)try{n.disconnect();}catch(e){}});
+  distortion=filter=chopGain=masterGain=null;
+  glitching=false;devCounter=0;lastY=null;trendY=null;
+  rod.classList.remove('playing');rod.classList.remove('glitch');
+}
+function engageGlitch(rate,strength){
+  if(glitching)return;glitching=true;rod.classList.add('glitch');
+  if(distortion)distortion.curve=makeDistortion(strength).curve;
+  if(filter)filter.frequency.setTargetAtTime(4000+(1-strength)*8000,audioCtx.currentTime,0.04);
+  startStutter(rate);
+}
+function clearGlitch(){
+  if(!glitching)return;glitching=false;rod.classList.remove('glitch');
+  if(distortion)distortion.curve=makeDistortion(0).curve;
+  if(filter)filter.frequency.setTargetAtTime(12000,audioCtx.currentTime,0.06);
+  clearStutter();
+}
+function startStutter(rate){
+  clearStutter();if(!chopGain)return;
+  const periodMs=1000/rate;let on=true;
+  stutterTimer=setInterval(()=>{on=!on;chopGain.gain.setValueAtTime(on?1:0,audioCtx.currentTime);},periodMs*STUTTER_DUTY);
+}
+function clearStutter(){if(stutterTimer){clearInterval(stutterTimer);stutterTimer=null;}if(chopGain)chopGain.gain.setValueAtTime(1,audioCtx?audioCtx.currentTime:0);}
+function mapDevToParams(absDev){const d=Math.min(MAX_DEV_FOR_RATE,absDev);const t=d/MAX_DEV_FOR_RATE;const rate=STUTTER_RATE_MIN+t*(STUTTER_RATE_MAX-STUTTER_RATE_MIN);return{rateHz:rate,strength:t};}
+
+/* ---- particles ---- */
+function resizeCanvas(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
+window.addEventListener('resize',resizeCanvas);resizeCanvas();
+
+function spawnParticles(y,deviation){
+  const t=Math.min(1,Math.abs(deviation)/MAX_DEV_FOR_RATE);
+  const hue=(1-t)*200 + t*0; // blue to red
+  const color=`hsl(${hue},100%,60%)`;
+  const count=Math.ceil(2+5*t);
+  const rodRect=rod.getBoundingClientRect();
+  for(let i=0;i<count;i++){
+    particles.push({
+      x:rodRect.left+rodRect.width/2+(Math.random()-0.5)*4,
+      y:y+(Math.random()-0.5)*8,
+      vx:(Math.random()-0.5)*(1+3*t),
+      vy:(Math.random()-0.5)*(2+5*t),
+      life:1,
+      color:color
+    });
+  }
+}
+function updateParticles(dt){
+  particles=particles.filter(p=>p.life>0);
+  for(let p of particles){
+    p.x+=p.vx*dt*60;
+    p.y+=p.vy*dt*60;
+    p.life-=dt*1.2;
+  }
+}
+function drawParticles(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(let p of particles){
+    ctx.globalAlpha=Math.max(0,p.life);
+    ctx.fillStyle=p.color;
+    ctx.fillRect(p.x,p.y,2,2);
+  }
+  ctx.globalAlpha=1;
+}
+let lastT=performance.now();
+function animate(t){
+  const dt=(t-lastT)/1000;lastT=t;
+  updateParticles(dt);drawParticles();
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+
+/* ---- pointer ---- */
+function onPointerDown(e){
+  e.preventDefault();ensureAudioCtx();
+  if(audioCtx.state==='suspended')audioCtx.resume();
+  if(!buffer){instr.textContent='Please upload a WAV first.';return;}
+  active=true;const y=e.clientY??(e.touches&&e.touches[0]&&e.touches[0].clientY);
+  trendY=y;lastY=y;devCounter=0;glitching=false;startPlayback();
+}
+function onPointerMove(e){
+  if(!active)return;
+  const y=e.clientY??(e.touches&&e.touches[0]&&e.touches[0].clientY);if(y==null)return;
+  trendY+=SMOOTH_ALPHA*(y-trendY);
+  const deviation=y-trendY,absDev=Math.abs(deviation);
+  if(absDev>DEV_THRESHOLD_PX){devCounter=Math.min(DEV_PERSIST+10,devCounter+1);spawnParticles(y,deviation);}
+  else devCounter=Math.max(0,devCounter-1);
+  if(devCounter>=DEV_PERSIST&&!glitching){const p=mapDevToParams(absDev);engageGlitch(p.rateHz,p.strength);}
+  else if(glitching&&devCounter<1)clearGlitch();
+  else if(glitching){const p=mapDevToParams(absDev);if(stutterTimer)startStutter(p.rateHz);if(distortion)distortion.curve=makeDistortion(p.strength).curve;if(filter)filter.frequency.setTargetAtTime(4000+(1-p.strength)*8000,audioCtx.currentTime,0.03);}
+  lastY=y;
+}
+function onPointerUp(){active=false;stopPlayback();}
+
+/* file upload */
+fileInput.addEventListener('change',async(ev)=>{
+  if(!ev.target.files||!ev.target.files[0])return;
+  const f=ev.target.files[0];ensureAudioCtx();
+  try{
+    const ab=await f.arrayBuffer();
+    buffer=await audioCtx.decodeAudioData(ab);
+    fileLabel.textContent=f.name;instr.textContent='Uploaded: '+f.name;
+  }catch{instr.textContent='Error decoding WAV — try another file.';buffer=null;}
+});
+rod.addEventListener('dragover',(e)=>{e.preventDefault();rod.style.opacity=0.9;});
+rod.addEventListener('dragleave',()=>rod.style.opacity='');
+rod.addEventListener('drop',async(e)=>{e.preventDefault();rod.style.opacity='';const f=e.dataTransfer.files[0];if(f){const ab=await f.arrayBuffer();buffer=await audioCtx.decodeAudioData(ab);fileLabel.textContent=f.name;instr.textContent='Uploaded: '+f.name;}});
+
+/* touch + pointer listeners */
+rod.addEventListener('touchstart',(ev)=>{ev.preventDefault();const t=ev.changedTouches[0];onPointerDown({clientY:t?t.clientY:undefined});},{passive:false});
+window.addEventListener('touchmove',(ev)=>{ev.preventDefault();const t=ev.touches[0];onPointerMove({clientY:t?t.clientY:undefined});},{passive:false});
+window.addEventListener('touchend',(ev)=>{ev.preventDefault();onPointerUp();},{passive:false});
+window.addEventListener('touchcancel',(ev)=>{ev.preventDefault();onPointerUp();},{passive:false});
+
+rod.addEventListener('pointerdown',onPointerDown);
+window.addEventListener('pointermove',onPointerMove);
+window.addEventListener('pointerup',onPointerUp);
+
+document.getElementById('btn').addEventListener('click',()=>fileInput.click());
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&active)onPointerUp();});
+</script>
+</body>
+</html>
