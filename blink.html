@@ -113,13 +113,13 @@ let faceMesh = null;
 function locateFileMapper(file){
   // if file name contains "simd" prefer simd binary
   if(typeof file === 'string' && file.toLowerCase().includes('simd')) {
-    return './libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm';
+    return '/libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm';
   }
   if(typeof file === 'string' && file.toLowerCase().includes('wasm')) {
-    return './libs/mediapipe/face_mesh_solution_wasm_bin.wasm';
+    return '/libs/mediapipe/face_mesh_solution_wasm_bin.wasm';
   }
   // default: map to the same basename in libs/mediapipe/
-  return './libs/mediapipe/' + file;
+  return '/libs/mediapipe/' + file;
 }
 
 async function requestCamera(){
