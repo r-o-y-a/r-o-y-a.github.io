@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Play the Cristal — upload WAV</title>
+<style>
+  :root{--bg:#0b0b0c;--rod-glow:#9fe1ff;--text:#e6eef6}
+  html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto}
+  .stage{box-sizing:border-box;width:100%;height:100%;display:flex;align-items:flex-start;justify-content:center;padding-top:15mm;padding-bottom:15mm;position:relative}
+  .instructions{position:fixed;top:6px;left:6px;right:6px;z-index:50;color:var(--text);font-size:14px;text-align:center;pointer-events:none}
+  #uploadBtn{position:fixed;top:6px;right:6px;z-index:60}
+  .rod{width:8mm;height:calc(100vh - 30mm);max-height:90vh;border-radius:6px;background:linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));box-shadow:0 8px 30px rgba(0,0,0,0.6), inset 0 0 18px rgba(255,255,255,0.02);display:flex;align-items:center;justify-content:center;transition:box-shadow 120ms,transform 120ms;-webkit-tap-highlight-color:transparent;user-select:none}
+  .rod.playing{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 28px var(--rod-glow),inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.01)}
+  .rod.glitch{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 40px #ff9fa0,inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.03) rotate(-0.2deg)}
+  .hairline{width:60%;height:2px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent);border-radius:2px;opacity:0.9}
+  #fileLabel{font-size:12px;color:#cfe9ff;margin-top:6px}
+  input[type=file]{display:none}
+</style>
+</head>
+<body>
+  <div class="instructions" id="instr">Upload a WAV (top-right) then touch the glass rod to play. Irregular motion briefly glitches the sound.</div>
+  <div id="uploadBtn">
+    <label style="display:inline-block">
+      <button id="btn">Upload WAV</button>
+      <input id="fileInput" type="file" accept=".wav,audio/*">
+    </label>
+    <div id="fileLabel"></div>
+  </div>
+
+  <div class="stage">
+    <div id="rod" class="rod" role="button" aria-label="Glass rod">
+      <div class="hairline"></div>
+    </div>
+  </div>
+
+<script>
+/* ---- config ---- */
+const SMOOTH_ALPHA = 0.18, DEV_THRESHOLD_PX = 8, DEV_PERSIST = 3, MAX_DEV_FOR_RATE = 80,
+      STUTTER_RATE_MIN = 6, STUTTER_RATE_MAX = 22, STUTTER_DUTY = 0.5;
+/* ---------------- */
+let audioCtx = null, buffer = null, src = null, masterGain = null, chopGain = null, distortion = null, filter = null;
+let stutterTimer = null, active=false, trendY=null, devCounter=0, glitching=false, lastY=null;
+const rod = document.getElementById('rod'), fileInput = document.getElementById('fileInput'), fileLabel = document.getElementById('fileLabel'), instr = document.getElementById('instr');
+
+function ensureAudioCtx(){
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+/* load file -> decode to buffer */
+async function loadFile(file){
+  ensureAudioCtx();
+  const ab = await file.arrayBuffer();
+  buffer = await audioCtx.decodeAudioData(ab);
+  fileLabel.textContent = file.name;
+}
+
+/* simple waveshaper maker */
+function makeDistortion(amount=0){
+  const ws = audioCtx.createWaveShaper();
+  const k = Math.max(0, Math.min(1000, amount * 400));
+  const n=2048; const curve=new Float32Array(n);
+  for(let i=0;i<n;i++){const x=(i/(n-1))*2-1; curve[i]=(1+k)*x/(1+k*Math.abs(x));}
+  ws.curve = curve; ws.oversample='2x'; return ws;
+}
+
+function startPlayback(){
+  if (!audioCtx || !buffer) return;
+  src = audioCtx.createBufferSource(); src.buffer = buffer; src.loop = true;
+  distortion = makeDistortion(0);
+  filter = audioCtx.createBiquadFilter(); filter.type='lowpass'; filter.frequency.value=12000; filter.Q.value=0.7;
+  chopGain = audioCtx.createGain(); chopGain.gain.value=1;
+  masterGain = audioCtx.createGain(); masterGain.gain.value=0.95;
+  src.connect(distortion); distortion.connect(filter); filter.connect(chopGain); chopGain.connect(masterGain); masterGain.connect(audioCtx.destination);
+  src.start();
+  rod.classList.add('playing');
+}
+
+function stopPlayback(){
+  try{ if (src){ src.stop(0); src.disconnect(); } }catch(e){}
+  src=null; clearStutter(); glitching=false; devCounter=0; lastY=null; trendY=null;
+  rod.classList.remove('playing'); rod.classList.remove('glitch');
+}
+
+function engageGlitch(rateHz,strength){
+  if (glitching) return; glitching=true; rod.classList.add('glitch');
+  distortion.curve = makeDistortion(strength).curve;
+  filter.frequency.setTargetAtTime(4000 + (1-strength)*8000, audioCtx.currentTime, 0.04);
+  startStutter(rateHz);
+}
+function clearGlitch(){ if(!glitching) return; glitching=false; rod.classList.remove('glitch'); distortion.curve=makeDistortion(0).curve; filter.frequency.setTargetAtTime(12000,audioCtx.currentTime,0.06); clearStutter(); }
+
+function startStutter(rateHz){
+  clearStutter();
+  if(!chopGain) return;
+  const periodMs = 1000 / rateHz;
+  let on=true; chopGain.gain.value=1;
+  stutterTimer = setInterval(()=>{ on=!on; chopGain.gain.setValueAtTime(on?1:0,audioCtx.currentTime); }, periodMs * STUTTER_DUTY);
+}
+function clearStutter(){ if(stutterTimer){ clearInterval(stutterTimer); stutterTimer=null;} if(chopGain) chopGain.gain.setValueAtTime(1,audioCtx?audioCtx.currentTime:0); }
+
+function mapDevToParams(absDev){
+  const d=Math.min(MAX_DEV_FOR_RATE,absDev), t=d/MAX_DEV_FOR_RATE;
+  const rate = STUTTER_RATE_MIN + t*(STUTTER_RATE_MAX - STUTTER_RATE_MIN);
+  return { rateHz: rate, strength: t };
+}
+
+/* pointer handling */
+function onPointerDown(e){
+  e.preventDefault();
+  ensureAudioCtx();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (!buffer){ instr.textContent = 'Please upload a WAV first (top-right).'; return; }
+  active=true;
+  const y = e.clientY ?? (e.touches && e.touches[0] && e.touches[0].clientY);
+  trendY = y; lastY = y; devCounter=0; glitching=false;
+  startPlayback();
+  if (e.pointerId && rod.setPointerCapture) try{ rod.setPointerCapture(e.pointerId); }catch(o){}
+}
+function onPointerMove(e){
+  if(!active) return;
+  const y = e.clientY ?? (e.touches && e.touches[0] && e.touches[0].clientY);
+  if (y==null) return;
+  trendY += SMOOTH_ALPHA * (y - trendY);
+  const deviation = y - trendY, absDev = Math.abs(deviation);
+  if (absDev > DEV_THRESHOLD_PX) devCounter = Math.min(DEV_PERSIST + 10, devCounter + 1); else devCounter = Math.max(0, devCounter - 1);
+  if (devCounter >= DEV_PERSIST && !glitching){ const p=mapDevToParams(absDev); engageGlitch(p.rateHz,p.strength); }
+  else if (glitching && devCounter < 1) clearGlitch();
+  else if (glitching){ const p=mapDevToParams(absDev); if (stutterTimer) startStutter(p.rateHz); distortion.curve = makeDistortion(p.strength).curve; filter.frequency.setTargetAtTime(4000 + (1-p.strength)*8000, audioCtx.currentTime, 0.03); }
+  lastY = y;
+}
+function onPointerUp(e){
+  active=false; stopPlayback();
+  if (e.pointerId && rod.releasePointerCapture) try{ rod.releasePointerCapture(e.pointerId); }catch(o){}
+}
+
+/* file input + drag-drop */
+fileInput.addEventListener('change', async (ev)=>{ if(ev.target.files && ev.target.files[0]) await loadFile(ev.target.files[0]); });
+rod.addEventListener('dragover', (e)=>{ e.preventDefault(); rod.style.opacity=0.9; });
+rod.addEventListener('dragleave', ()=>{ rod.style.opacity=''; });
+rod.addEventListener('drop', async (e)=>{ e.preventDefault(); rod.style.opacity=''; const f = e.dataTransfer.files[0]; if(f) await loadFile(f); });
+
+/* pointer & touch listeners */
+rod.addEventListener('pointerdown', onPointerDown);
+window.addEventListener('pointermove', onPointerMove);
+window.addEventListener('pointerup', onPointerUp);
+rod.addEventListener('touchstart', (ev)=>onPointerDown(ev.changedTouches[0]));
+window.addEventListener('touchmove', (ev)=>onPointerMove(ev.changedTouches[0]), {passive:false});
+window.addEventListener('touchend', (ev)=>onPointerUp(ev.changedTouches[0]));
+window.addEventListener('touchcancel', (ev)=>onPointerUp(ev.changedTouches[0]));
+
+/* simple UX: open file dialog when pressing button */
+document.getElementById('btn').addEventListener('click', ()=>fileInput.click());
+
+/* stop if page hidden */
+document.addEventListener('visibilitychange', ()=>{ if (document.hidden && active) onPointerUp({}); });
+</script>
+</body>
+</html>
