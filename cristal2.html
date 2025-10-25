@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Cristal Rod — Smooth Glitch Version</title>
+<title>Cristal Rod — Smooth Glitch Version (with spectrogram)</title>
 <style>
   :root{--bg:#0b0b0c;--rod-glow:#9fe1ff;--text:#e6eef6}
   html,body,*{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none}
@@ -23,6 +23,8 @@
   .rod.glitch{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 40px #ff9fa0,inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.03) rotate(-0.2deg)}
   .hairline{width:60%;height:2px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent);border-radius:2px;opacity:0.9}
   canvas#particles{position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;pointer-events:none}
+  /* spectrogram */
+  canvas#spec{position:fixed;right:8px;top:50%;transform:translateY(-50%);width:160px;height:240px;border:1px solid rgba(255,255,255,0.04);z-index:40;background:rgba(0,0,0,0.06)}
 </style>
 </head>
 <body>
@@ -41,6 +43,9 @@
   <div id="rod" class="rod" role="button"><div class="hairline"></div></div>
 </div>
 
+<!-- spectrogram canvas -->
+<canvas id="spec" width="160" height="240"></canvas>
+
 <script>
 /* ===== CONFIG ===== */
 const MAX_ACCEL = 60;            // higher = less sensitive
@@ -48,18 +53,34 @@ const MAX_VELOCITY = 70;
 const PRESSURE_SENSITIVITY = 1.2;
 /* ================== */
 
+/* ===== Cristal JI ratios (user-provided) and base freq D3 ===== */
+const CRISTAL_BASE = 146.83; // D3
+const JI_RATIOS = [
+  1/1,       // D3
+  8/7,
+  6/5,
+  10/7,
+  3/2,
+  5/3,
+  9/5,
+  2/1
+];
+
 let audioCtx=null, buffer=null, src=null,
     distortion=null, filter=null, masterGain=null,
+    analyser=null, analyserFftSize=4096,
     active=false, lastY=null, lastVelocity=0,
     velocity=0, acceleration=0, pressure=0,
-    glitching=false;
+    glitching=false, lastPitchAdj=1;
 
 const rod=document.getElementById('rod'),
       fileInput=document.getElementById('fileInput'),
       fileLabel=document.getElementById('fileLabel'),
       instr=document.getElementById('instr'),
       canvas=document.getElementById('particles'),
-      ctx=canvas.getContext('2d');
+      ctx=canvas.getContext('2d'),
+      specCanvas=document.getElementById('spec'),
+      sctx=specCanvas.getContext('2d');
 
 let particles=[];
 
@@ -99,12 +120,28 @@ function drawParticles(){
   ctx.globalAlpha=1;
 }
 let lastT=performance.now();
-function animate(t){
-  const dt=(t-lastT)/1000;lastT=t;
-  updateParticles(dt);drawParticles();
-  requestAnimationFrame(animate);
+
+/* --- Spectrogram setup --- */
+sctx.fillStyle='black';
+sctx.fillRect(0,0,specCanvas.width,specCanvas.height);
+function drawSpectrogram(freqData){
+  // scroll left by 1 px
+  sctx.drawImage(specCanvas, -1, 0);
+  // draw new column at right
+  const w = specCanvas.width;
+  const h = specCanvas.height;
+  const bins = freqData.length;
+  for (let i = 0; i < bins; i++) {
+    const mag = freqData[i]; // 0..255
+    // map bin to y (log-ish)
+    const y = Math.floor(h - (i / bins) * h);
+    const brightness = mag / 255;
+    // color map: bluish -> red for high magnitude
+    const hue = (1 - brightness) * 220; // 220 (blue) -> 0 (red)
+    sctx.fillStyle = `hsl(${hue},80%,${20 + brightness*60}%)`;
+    sctx.fillRect(w-1, y, 1, Math.ceil(h / bins + 0.5));
+  }
 }
-requestAnimationFrame(animate);
 
 /* --- Audio functions --- */
 function ensureAudioCtx(){
@@ -135,7 +172,10 @@ function startPlayback(){
   filter.type='lowpass';filter.frequency.value=12000;filter.Q.value=0.7;
   masterGain=audioCtx.createGain();masterGain.gain.value=0.9;
   src=audioCtx.createBufferSource();src.buffer=buffer;src.loop=true;
-  src.connect(distortion);distortion.connect(filter);filter.connect(masterGain);masterGain.connect(audioCtx.destination);
+  analyser=audioCtx.createAnalyser();analyser.fftSize=analyserFftSize;
+  // connect graph: src -> distortion -> filter -> master -> dest
+  src.connect(distortion);distortion.connect(filter);filter.connect(masterGain);masterGain.connect(analyser);masterGain.connect(audioCtx.destination);
+  // start
   src.start();
   rod.classList.add('playing');
 }
@@ -145,6 +185,7 @@ function stopPlayback(){
   if(distortion)try{distortion.disconnect();}catch{};distortion=null;
   if(filter)try{filter.disconnect();}catch{};filter=null;
   if(masterGain)try{masterGain.disconnect();}catch{};masterGain=null;
+  if(analyser)try{analyser.disconnect();}catch{};analyser=null;
   glitching=false;
   rod.classList.remove('playing');rod.classList.remove('glitch');
 }
@@ -156,7 +197,55 @@ function mapParams(v,a,p){
   const bright=2000+vn*9000;
   const dist=an*0.4;
   const amp=0.4+p*PRESSURE_SENSITIVITY;
-  return{bright,dist,amp,an};
+  return{bright,dist,amp,an,vn};
+}
+
+/* --- Utility: autocorrelation pitch detection (time-domain) --- */
+/* Adapted from Chris Wilson pitchdetect */
+function autoCorrelate(buf, sampleRate) {
+  // buf: Float32Array time-domain signal
+  const SIZE = buf.length;
+  let rms = 0;
+  for (let i = 0; i < SIZE; i++) {
+    const val = buf[i];
+    rms += val*val;
+  }
+  rms = Math.sqrt(rms/SIZE);
+  if (rms < 0.002) return -1; // too quiet
+
+  let r1 = 0, r2 = SIZE-1, thres = 0.2;
+  for (let i = 0; i < SIZE/2; i++) {
+    if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+  }
+  for (let i = 1; i < SIZE/2; i++) {
+    if (Math.abs(buf[SIZE-i]) < thres) { r2 = SIZE-i; break; }
+  }
+  buf = buf.slice(r1, r2);
+  const newSize = buf.length;
+
+  const c = new Array(newSize).fill(0);
+  for (let i = 0; i < newSize; i++) {
+    for (let j = 0; j < newSize - i; j++) {
+      c[i] = c[i] + buf[j]*buf[j+i];
+    }
+  }
+  let d = 0;
+  while (c[d] > c[d+1]) d++;
+  let maxval = -1, maxpos = -1;
+  for (let i = d; i < newSize; i++) {
+    if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
+  }
+  if (maxpos === -1) return -1;
+  // interpolation for better precision
+  const x1 = c[maxpos-1], x2 = c[maxpos], x3 = c[maxpos+1];
+  const a = (x1 + x3 - 2*x2)/2;
+  const b = (x3 - x1)/2;
+  let shift = 0;
+  if (a) shift = -b/(2*a);
+  const period = (maxpos + shift);
+  const freq = sampleRate / period;
+  if (freq > 0 && freq < 20000) return freq;
+  return -1;
 }
 
 /* --- Gesture handling --- */
@@ -207,6 +296,56 @@ rod.addEventListener('drop',async e=>{
   e.preventDefault();rod.style.opacity='';
   const f=e.dataTransfer.files[0];if(f)await loadFile(f);
 });
+
+/* --- Main animation — particles + audio analysis + spectrogram + pitch snap --- */
+function animate(t){
+  const dt=(t-lastT)/1000;lastT=t;
+  updateParticles(dt);drawParticles();
+
+  // audio analysis & spectrogram
+  if(analyser && audioCtx){
+    // spectrogram column
+    const freqData = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(freqData);
+    drawSpectrogram(freqData);
+
+    // pitch detection from time-domain
+    const timeData = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(timeData);
+    const detected = autoCorrelate(timeData, audioCtx.sampleRate);
+    if (detected > 0) {
+      // compute snapped target depending on acceleration (p.an)
+      const p = mapParams(velocity, acceleration, pressure);
+      // if stable -> map to base exactly
+      // if unstable -> snap toward nearest JI ratio relative to base
+      // find nearest ratio target to the detected
+      let snappedTarget = CRISTAL_BASE;
+      // compute distance (in cents) to each ratio * base
+      let best = {idx:0, centsDist:1e9};
+      for (let i=0;i<JI_RATIOS.length;i++){
+        const candidate = CRISTAL_BASE * JI_RATIOS[i];
+        // cents distance between detected and candidate: 1200*log2(det/cand)
+        const cents = Math.abs(1200 * Math.log2(detected / candidate));
+        if (cents < best.centsDist){ best = {idx:i, centsDist:cents, candidate}; }
+      }
+      snappedTarget = best.candidate;
+      // interpolation weight: p.an (0..1). smaller threshold so subtle gestures don't fully snap.
+      const snapStrength = Math.min(1, Math.max(0, (p.an - 0.15) / 0.85)); // start snapping after ~0.15
+      const finalTarget = CRISTAL_BASE * (1 - snapStrength) + snappedTarget * snapStrength;
+      // compute desired playbackRate
+      const desiredRate = finalTarget / detected;
+      // smooth
+      const smoothed = lastPitchAdj * 0.85 + desiredRate * 0.15;
+      lastPitchAdj = smoothed;
+      if (src && src.playbackRate) {
+        try { src.playbackRate.setTargetAtTime(smoothed, audioCtx.currentTime, 0.05); } catch(e){ src.playbackRate.value = smoothed; }
+      }
+    }
+  }
+
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
 
 /* --- Listeners --- */
 rod.addEventListener('touchstart',onDown,{passive:false});
