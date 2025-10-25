@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Play the Cristal — upload WAV</title>
+<title>Play the Cristal — upload WAV (default: cristal.wav)</title>
 <style>
   :root{--bg:#0b0b0c;--rod-glow:#9fe1ff;--text:#e6eef6}
   /* Prevent any text selection / drag / callout */
@@ -18,17 +18,17 @@
   /* stage with rod centered, rod reaches edges */
   .stage{box-sizing:border-box;width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative}
   .rod{
-    width:8mm;                    /* 8mm wide */
-    height:100vh;                 /* full viewport height -> edges top & bottom */
+    width:8mm;
+    height:100vh;
     max-height:100vh;
-    border-radius:6px;            /* rounded sides; ends will reach edge */
+    border-radius:6px;
     background:linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
     box-shadow:0 8px 30px rgba(0,0,0,0.6), inset 0 0 18px rgba(255,255,255,0.02);
     display:flex;align-items:center;justify-content:center;
     transition:box-shadow 120ms, transform 120ms;
     -webkit-tap-highlight-color: transparent;
     pointer-events:auto;
-    touch-action:none; /* allow fine-grained touch handling without browser scrolling */
+    touch-action:none;
   }
   .rod.playing{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 28px var(--rod-glow),inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.01)}
   .rod.glitch{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 40px #ff9fa0,inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.03) rotate(-0.2deg)}
@@ -37,7 +37,7 @@
 </style>
 </head>
 <body>
-  <div class="instructions" id="instr">Upload a WAV (top-right) then touch the glass rod to play. Irregular motion briefly glitches the sound.</div>
+  <div class="instructions" id="instr">Upload a WAV (top-right) or use default <code>cristal.wav</code>, then touch the glass rod to play. Irregular motion briefly glitches the sound.</div>
 
   <div id="uploadBtn">
     <label style="display:inline-block">
@@ -66,9 +66,29 @@ function ensureAudioCtx(){ if (!audioCtx) audioCtx = new (window.AudioContext ||
 
 async function loadFile(file){
   ensureAudioCtx();
-  const ab = await file.arrayBuffer();
-  buffer = await audioCtx.decodeAudioData(ab);
-  fileLabel.textContent = file.name;
+  try{
+    const ab = await file.arrayBuffer();
+    buffer = await audioCtx.decodeAudioData(ab);
+    fileLabel.textContent = file.name + (file.name === 'cristal.wav' ? ' (uploaded)' : '');
+  }catch(err){
+    console.warn('Error decoding file:', err);
+    instr.textContent = 'Error decoding WAV — try another file.';
+  }
+}
+
+/* try to load default file cristal.wav from same folder */
+async function loadDefaultIfAvailable(){
+  try{
+    ensureAudioCtx();
+    const res = await fetch('cristal.wav', {cache: "no-store"});
+    if (!res.ok) throw new Error('not found');
+    const ab = await res.arrayBuffer();
+    buffer = await audioCtx.decodeAudioData(ab);
+    fileLabel.textContent = 'cristal.wav (default)';
+  }catch(e){
+    // default not found; silently ignore (label remains empty)
+    console.info('Default cristal.wav not loaded:', e.message);
+  }
 }
 
 function makeDistortion(amount=0){
@@ -125,7 +145,7 @@ function onPointerDown(e){
   e.preventDefault();
   ensureAudioCtx();
   if (audioCtx.state === 'suspended') audioCtx.resume();
-  if (!buffer){ instr.textContent = 'Please upload a WAV first (top-right).'; return; }
+  if (!buffer){ instr.textContent = 'Please upload a WAV or place cristal.wav in the same folder.'; return; }
   active=true;
   const y = e.clientY ?? (e.touches && e.touches[0] && e.touches[0].clientY);
   trendY = y; lastY = y; devCounter=0; glitching=false;
@@ -169,6 +189,9 @@ document.getElementById('btn').addEventListener('click', ()=>fileInput.click());
 
 /* stop if page hidden */
 document.addEventListener('visibilitychange', ()=>{ if (document.hidden && active) onPointerUp({}); });
+
+/* try load default on startup */
+window.addEventListener('load', ()=>{ loadDefaultIfAvailable(); });
 </script>
 </body>
 </html>
