@@ -3,15 +3,51 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Cristal Rod — WAV upload with particles</title>
+<title>Cristal Rod — with particles</title>
 <style>
   :root{--bg:#0b0b0c;--rod-glow:#9fe1ff;--text:#e6eef6}
-  html,body,*{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none;touch-action:none}
-  html,body{height:100%;margin:0;background:var(--bg);overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto}
-  .instructions{position:fixed;top:6px;left:6px;right:6px;z-index:50;color:var(--text);font-size:14px;text-align:center;pointer-events:none}
-  #uploadBtn{position:fixed;top:6px;right:6px;z-index:60;text-align:right;}
-  #fileLabel{font-size:12px;color:#cfe9ff;margin-top:6px}
+  
+  /* ✅ fixed: removed touch-action:none here */
+  html,body,*{
+    user-select:none;
+    -webkit-user-select:none;
+    -webkit-touch-callout:none;
+    -webkit-user-drag:none;
+  }
+
+  html,body{
+    height:100%;
+    margin:0;
+    background:var(--bg);
+    overflow:hidden;
+    font-family:system-ui,-apple-system,Segoe UI,Roboto;
+  }
+
+  .instructions{
+    position:fixed;
+    top:6px;left:6px;right:6px;
+    z-index:50;
+    color:var(--text);
+    font-size:14px;
+    text-align:center;
+    pointer-events:none;
+  }
+
+  #uploadBtn{
+    position:fixed;
+    top:6px;right:6px;
+    z-index:60;
+    text-align:right;
+  }
+
+  #fileLabel{
+    font-size:12px;
+    color:#cfe9ff;
+    margin-top:6px;
+  }
+
   input[type=file]{display:none}
+
   label.upload-label{
     display:inline-block;
     padding:6px 12px;
@@ -22,30 +58,76 @@
     cursor:pointer;
     font-size:14px;
   }
+
   label.upload-label:hover{background:#2b2b2f;}
-  .stage{width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+
+  .stage{
+    width:100%;
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    position:relative;
+    overflow:hidden;
+  }
+
   .rod{
-    width:8mm;height:100vh;border-radius:6px;
+    width:8mm;
+    height:100vh;
+    border-radius:6px;
     background:linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02));
     box-shadow:0 8px 30px rgba(0,0,0,0.6),inset 0 0 18px rgba(255,255,255,0.02);
-    display:flex;align-items:center;justify-content:center;
+    display:flex;
+    align-items:center;
+    justify-content:center;
     transition:box-shadow 120ms,transform 120ms;
-    -webkit-tap-highlight-color:transparent;pointer-events:auto;touch-action:none;
-    position:relative;z-index:10;
+    -webkit-tap-highlight-color:transparent;
+    pointer-events:auto;
+    touch-action:none; /* ✅ keep only here */
+    position:relative;
+    z-index:10;
   }
-  .rod.playing{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 28px var(--rod-glow),inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.01)}
-  .rod.glitch{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 40px #ff9fa0,inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.03) rotate(-0.2deg)}
-  .hairline{width:60%;height:2px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent);border-radius:2px;opacity:0.9}
-  canvas#particles{position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;pointer-events:none;}
+
+  .rod.playing{
+    box-shadow:0 10px 40px rgba(0,0,0,0.7),
+               0 0 28px var(--rod-glow),
+               inset 0 0 22px rgba(255,255,255,0.05);
+    transform:scale(1.01);
+  }
+
+  .rod.glitch{
+    box-shadow:0 10px 40px rgba(0,0,0,0.7),
+               0 0 40px #ff9fa0,
+               inset 0 0 22px rgba(255,255,255,0.05);
+    transform:scale(1.03) rotate(-0.2deg);
+  }
+
+  .hairline{
+    width:60%;
+    height:2px;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent);
+    border-radius:2px;
+    opacity:0.9;
+  }
+
+  canvas#particles{
+    position:absolute;
+    top:0;left:0;
+    width:100%;height:100%;
+    z-index:1;
+    pointer-events:none;
+  }
 </style>
 </head>
 <body>
-  <div class="instructions" id="instr">Upload a WAV to play. Touch the rod to start; wiggle to glitch — deviations release color particles.</div>
+  <div class="instructions" id="instr">
+    Upload a WAV to play. Touch the rod to start; wiggle to glitch — deviations release color particles.
+  </div>
 
   <div id="uploadBtn">
     <label class="upload-label">
-      Upload WAV
       <input id="fileInput" type="file" accept=".wav,audio/*">
+      <span>Upload WAV</span>
     </label>
     <div id="fileLabel"></div>
   </div>
