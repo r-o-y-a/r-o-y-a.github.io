@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Cristal Rod — Smooth Glitch Version (with spectrogram)</title>
+<title>Cristal Rod — Glitch (spectrogram shows pre-distortion result)</title>
 <style>
   :root{--bg:#0b0b0c;--rod-glow:#9fe1ff;--text:#e6eef6}
   html,body,*{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none}
@@ -23,12 +23,11 @@
   .rod.glitch{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 40px #ff9fa0,inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.03) rotate(-0.2deg)}
   .hairline{width:60%;height:2px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent);border-radius:2px;opacity:0.9}
   canvas#particles{position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;pointer-events:none}
-  /* spectrogram */
   canvas#spec{position:fixed;right:8px;top:50%;transform:translateY(-50%);width:160px;height:240px;border:1px solid rgba(255,255,255,0.04);z-index:40;background:rgba(0,0,0,0.06)}
 </style>
 </head>
 <body>
-<div class="instructions" id="instr">Upload a WAV, then touch the rod to play. Smooth movement keeps it pure; rough motion distorts it.</div>
+<div class="instructions" id="instr">Upload a WAV, then touch the rod to play. Spectrogram shows the touch-mapped signal before distortion (visual only).</div>
 
 <div id="uploadBtn">
   <label class="upload-label">
@@ -43,35 +42,23 @@
   <div id="rod" class="rod" role="button"><div class="hairline"></div></div>
 </div>
 
-<!-- spectrogram canvas -->
 <canvas id="spec" width="160" height="240"></canvas>
 
 <script>
 /* ===== CONFIG ===== */
-const MAX_ACCEL = 60;            // higher = less sensitive
+const MAX_ACCEL = 60;
 const MAX_VELOCITY = 70;
 const PRESSURE_SENSITIVITY = 1.2;
 /* ================== */
 
-/* ===== Cristal JI ratios (user-provided) and base freq D3 ===== */
-const CRISTAL_BASE = 146.83; // D3
-const JI_RATIOS = [
-  1/1,       // D3
-  8/7,
-  6/5,
-  10/7,
-  3/2,
-  5/3,
-  9/5,
-  2/1
-];
-
 let audioCtx=null, buffer=null, src=null,
     distortion=null, filter=null, masterGain=null,
     analyser=null, analyserFftSize=4096,
+    // visual-only pre-distortion branch:
+    preFilter=null, preGain=null, preAnalyser=null,
     active=false, lastY=null, lastVelocity=0,
     velocity=0, acceleration=0, pressure=0,
-    glitching=false, lastPitchAdj=1;
+    glitching=false;
 
 const rod=document.getElementById('rod'),
       fileInput=document.getElementById('fileInput'),
@@ -90,7 +77,7 @@ window.addEventListener('resize',resizeCanvas);resizeCanvas();
 
 function spawnParticles(y,accel,press){
   const accelNorm=Math.min(1,Math.abs(accel)/MAX_ACCEL);
-  const hue=(1-accelNorm)*200+accelNorm*0; // blue→red
+  const hue=(1-accelNorm)*200+accelNorm*0;
   const color=`hsl(${hue},100%,60%)`;
   const count=Math.ceil(1+3*accelNorm+2*press);
   const rodRect=rod.getBoundingClientRect();
@@ -121,23 +108,19 @@ function drawParticles(){
 }
 let lastT=performance.now();
 
-/* --- Spectrogram setup --- */
+/* --- Spectrogram setup (draws from preAnalyser when available) --- */
 sctx.fillStyle='black';
 sctx.fillRect(0,0,specCanvas.width,specCanvas.height);
 function drawSpectrogram(freqData){
-  // scroll left by 1 px
   sctx.drawImage(specCanvas, -1, 0);
-  // draw new column at right
   const w = specCanvas.width;
   const h = specCanvas.height;
   const bins = freqData.length;
   for (let i = 0; i < bins; i++) {
-    const mag = freqData[i]; // 0..255
-    // map bin to y (log-ish)
+    const mag = freqData[i];
     const y = Math.floor(h - (i / bins) * h);
     const brightness = mag / 255;
-    // color map: bluish -> red for high magnitude
-    const hue = (1 - brightness) * 220; // 220 (blue) -> 0 (red)
+    const hue = (1 - brightness) * 220;
     sctx.fillStyle = `hsl(${hue},80%,${20 + brightness*60}%)`;
     sctx.fillRect(w-1, y, 1, Math.ceil(h / bins + 0.5));
   }
@@ -167,15 +150,28 @@ function makeDistortion(amount=0){
 function startPlayback(){
   if(!audioCtx||!buffer)return;
   stopPlayback();
+
+  // audio (with distortion) branch
   distortion=makeDistortion(0);
   filter=audioCtx.createBiquadFilter();
   filter.type='lowpass';filter.frequency.value=12000;filter.Q.value=0.7;
   masterGain=audioCtx.createGain();masterGain.gain.value=0.9;
+
+  // visual-only pre-distortion branch (applies same filter+gain but NOT distortion)
+  preFilter = audioCtx.createBiquadFilter();
+  preFilter.type='lowpass'; preFilter.frequency.value=12000; preFilter.Q.value=0.7;
+  preGain = audioCtx.createGain(); preGain.gain.value=0.9;
+  preAnalyser = audioCtx.createAnalyser(); preAnalyser.fftSize = analyserFftSize;
+
   src=audioCtx.createBufferSource();src.buffer=buffer;src.loop=true;
   analyser=audioCtx.createAnalyser();analyser.fftSize=analyserFftSize;
-  // connect graph: src -> distortion -> filter -> master -> dest
-  src.connect(distortion);distortion.connect(filter);filter.connect(masterGain);masterGain.connect(analyser);masterGain.connect(audioCtx.destination);
-  // start
+
+  // connect: main audio -> distortion -> filter -> masterGain -> analyser -> destination
+  src.connect(distortion); distortion.connect(filter); filter.connect(masterGain); masterGain.connect(analyser); masterGain.connect(audioCtx.destination);
+
+  // connect: visual-only branch -> preFilter -> preGain -> preAnalyser (NOT to destination)
+  src.connect(preFilter); preFilter.connect(preGain); preGain.connect(preAnalyser);
+
   src.start();
   rod.classList.add('playing');
 }
@@ -186,66 +182,23 @@ function stopPlayback(){
   if(filter)try{filter.disconnect();}catch{};filter=null;
   if(masterGain)try{masterGain.disconnect();}catch{};masterGain=null;
   if(analyser)try{analyser.disconnect();}catch{};analyser=null;
+
+  if(preFilter)try{preFilter.disconnect();}catch{};preFilter=null;
+  if(preGain)try{preGain.disconnect();}catch{};preGain=null;
+  if(preAnalyser)try{preAnalyser.disconnect();}catch{};preAnalyser=null;
+
   glitching=false;
   rod.classList.remove('playing');rod.classList.remove('glitch');
 }
 
-/* --- Parameter mapping --- */
+/* --- Parameter mapping (controls timbre only) --- */
 function mapParams(v,a,p){
   const vn=Math.min(1,Math.abs(v)/MAX_VELOCITY);
   const an=Math.min(1,Math.abs(a)/MAX_ACCEL);
   const bright=2000+vn*9000;
-  const dist=an*0.4;
-  const amp=0.4+p*PRESSURE_SENSITIVITY;
+  const dist=an*0.45;
+  const amp=0.35+Math.min(1, p*PRESSURE_SENSITIVITY);
   return{bright,dist,amp,an,vn};
-}
-
-/* --- Utility: autocorrelation pitch detection (time-domain) --- */
-/* Adapted from Chris Wilson pitchdetect */
-function autoCorrelate(buf, sampleRate) {
-  // buf: Float32Array time-domain signal
-  const SIZE = buf.length;
-  let rms = 0;
-  for (let i = 0; i < SIZE; i++) {
-    const val = buf[i];
-    rms += val*val;
-  }
-  rms = Math.sqrt(rms/SIZE);
-  if (rms < 0.002) return -1; // too quiet
-
-  let r1 = 0, r2 = SIZE-1, thres = 0.2;
-  for (let i = 0; i < SIZE/2; i++) {
-    if (Math.abs(buf[i]) < thres) { r1 = i; break; }
-  }
-  for (let i = 1; i < SIZE/2; i++) {
-    if (Math.abs(buf[SIZE-i]) < thres) { r2 = SIZE-i; break; }
-  }
-  buf = buf.slice(r1, r2);
-  const newSize = buf.length;
-
-  const c = new Array(newSize).fill(0);
-  for (let i = 0; i < newSize; i++) {
-    for (let j = 0; j < newSize - i; j++) {
-      c[i] = c[i] + buf[j]*buf[j+i];
-    }
-  }
-  let d = 0;
-  while (c[d] > c[d+1]) d++;
-  let maxval = -1, maxpos = -1;
-  for (let i = d; i < newSize; i++) {
-    if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
-  }
-  if (maxpos === -1) return -1;
-  // interpolation for better precision
-  const x1 = c[maxpos-1], x2 = c[maxpos], x3 = c[maxpos+1];
-  const a = (x1 + x3 - 2*x2)/2;
-  const b = (x3 - x1)/2;
-  let shift = 0;
-  if (a) shift = -b/(2*a);
-  const period = (maxpos + shift);
-  const freq = sampleRate / period;
-  if (freq > 0 && freq < 20000) return freq;
-  return -1;
 }
 
 /* --- Gesture handling --- */
@@ -268,9 +221,14 @@ function onMove(e){
   pressure=f;
   const p=mapParams(velocity,acceleration,pressure);
 
+  // TIMBRE / GLITCH CHANGES — affect actual sound (filter, distortion, gain)
   if(filter)filter.frequency.setTargetAtTime(p.bright*(1-pressure*0.2),audioCtx.currentTime,0.05);
   if(distortion)distortion.curve=makeDistortion(p.dist).curve;
-  if(masterGain)masterGain.gain.setTargetAtTime(p.amp,audioCtx.currentTime,0.05);
+  if(masterGain)masterGain.gain.setTargetAtTime(p.amp,audioCtx.currentTime,0.03);
+
+  // Mirror deterministic params to the visual-only branch (pre-distortion)
+  if(preFilter)preFilter.frequency.setTargetAtTime(p.bright*(1-pressure*0.2),audioCtx.currentTime,0.05);
+  if(preGain)preGain.gain.setTargetAtTime(p.amp,audioCtx.currentTime,0.03);
 
   if(Math.abs(acceleration)>10)spawnParticles(y,acceleration,pressure);
 
@@ -297,50 +255,17 @@ rod.addEventListener('drop',async e=>{
   const f=e.dataTransfer.files[0];if(f)await loadFile(f);
 });
 
-/* --- Main animation — particles + audio analysis + spectrogram + pitch snap --- */
+/* --- Main animation: particles + spectrogram (now uses preAnalyser when present) --- */
 function animate(t){
   const dt=(t-lastT)/1000;lastT=t;
   updateParticles(dt);drawParticles();
 
-  // audio analysis & spectrogram
-  if(analyser && audioCtx){
-    // spectrogram column
-    const freqData = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteFrequencyData(freqData);
+  // prefer preAnalyser (pre-distortion visual branch), fallback to post-effects analyser
+  const drawFrom = preAnalyser || analyser;
+  if(drawFrom && audioCtx){
+    const freqData = new Uint8Array(drawFrom.frequencyBinCount);
+    drawFrom.getByteFrequencyData(freqData);
     drawSpectrogram(freqData);
-
-    // pitch detection from time-domain
-    const timeData = new Float32Array(analyser.fftSize);
-    analyser.getFloatTimeDomainData(timeData);
-    const detected = autoCorrelate(timeData, audioCtx.sampleRate);
-    if (detected > 0) {
-      // compute snapped target depending on acceleration (p.an)
-      const p = mapParams(velocity, acceleration, pressure);
-      // if stable -> map to base exactly
-      // if unstable -> snap toward nearest JI ratio relative to base
-      // find nearest ratio target to the detected
-      let snappedTarget = CRISTAL_BASE;
-      // compute distance (in cents) to each ratio * base
-      let best = {idx:0, centsDist:1e9};
-      for (let i=0;i<JI_RATIOS.length;i++){
-        const candidate = CRISTAL_BASE * JI_RATIOS[i];
-        // cents distance between detected and candidate: 1200*log2(det/cand)
-        const cents = Math.abs(1200 * Math.log2(detected / candidate));
-        if (cents < best.centsDist){ best = {idx:i, centsDist:cents, candidate}; }
-      }
-      snappedTarget = best.candidate;
-      // interpolation weight: p.an (0..1). smaller threshold so subtle gestures don't fully snap.
-      const snapStrength = Math.min(1, Math.max(0, (p.an - 0.15) / 0.85)); // start snapping after ~0.15
-      const finalTarget = CRISTAL_BASE * (1 - snapStrength) + snappedTarget * snapStrength;
-      // compute desired playbackRate
-      const desiredRate = finalTarget / detected;
-      // smooth
-      const smoothed = lastPitchAdj * 0.85 + desiredRate * 0.15;
-      lastPitchAdj = smoothed;
-      if (src && src.playbackRate) {
-        try { src.playbackRate.setTargetAtTime(smoothed, audioCtx.currentTime, 0.05); } catch(e){ src.playbackRate.value = smoothed; }
-      }
-    }
   }
 
   requestAnimationFrame(animate);
