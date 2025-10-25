@@ -3,38 +3,37 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Blink Squares — Debug Loader (blink.html)</title>
+<title>Blink Squares — Start Fix (blink.html)</title>
 <style>
-  :root{--bg:#fbfbfb;--muted:#666;--card:#111}
+  :root{--bg:#fbfbfb;--muted:#666}
   
 html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe 
 UI,Roboto,Helvetica,Arial;color:#111}
   
-.wrap{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:20px;box-sizing:border-box}
+.wrap{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;box-sizing:border-box}
   h1{margin:0;font-size:20px;font-weight:600}
   .squares{display:flex;gap:12px;align-items:center;justify-content:center}
   
-.sq{width:92px;height:92px;border-radius:12px;background:#111;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;box-shadow:0 
+.sq{width:92px;height:92px;border-radius:12px;background:#111;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;box-shadow:0 
 8px 20px rgba(12,12,12,.12);font-size:14px}
   .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center}
   #startBtn{padding:12px 
-16px;font-size:16px;border-radius:10px;border:0;background:#111;color:#fff;cursor:pointer}
+18px;font-size:16px;border-radius:10px;border:0;background:#111;color:#fff;cursor:pointer}
   #status{font-size:13px;color:var(--muted);max-width:720px;text-align:center}
   
 #errorBox{font-size:13px;color:#b00020;max-width:720px;text-align:left;white-space:pre-wrap}
-  #videoEl{display:none;width:320px;height:240px}
+  #videoEl{display:none}
   canvas{display:none}
   .note{font-size:13px;color:var(--muted);max-width:640px;text-align:center}
-  .small{font-size:12px;color:var(--muted)}
-  @media (max-width:420px){
-    .sq{width:74px;height:74px;font-size:12px;border-radius:10px}
-    #startBtn{font-size:15px;padding:10px 14px}
-  }
+  @media (max-width:420px){ .sq{width:74px;height:74px;font-size:12px} 
+#startBtn{font-size:15px} }
+  
+#debugLog{font-family:monospace;font-size:12px;color:#222;max-width:720px;white-space:pre-wrap;text-align:left}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Blink Squares — Local libs (debug)</h1>
+  <h1>Blink Squares — Left / Right / Both</h1>
 
   <div class="squares" aria-hidden="true">
     <div id="leftSq" class="sq" aria-label="left">LEFT</div>
@@ -43,55 +42,50 @@ UI,Roboto,Helvetica,Arial;color:#111}
   </div>
 
   <div class="controls">
-    <button id="startBtn" aria-label="Start camera" disabled>Start camera</button>
-    <div id="status">Initializing local libraries…</div>
+    <!-- button intentionally NOT disabled; uses inline handler to ensure click = user 
+gesture -->
+    <button id="startBtn" onclick="startFlow()">Start camera</button>
+    <div id="status">Click Start. If nothing happens check console or the debug log 
+below.</div>
   </div>
 
   <div id="errorBox" aria-live="polite"></div>
+  <div id="debugLog"></div>
 
-  <p class="note small">This file dynamically checks and loads local libs from 
-<code>libs/</code>. If it stays on "Initializing…" open the browser console to see 
-errors.</p>
+  <p class="note">Place local libs at: <code>libs/tf.min.js</code>, 
+<code>libs/face-landmarks-detection.min.js</code>, <code>libs/mediapipe/face_mesh.js</code>, 
+and the wasm files in <code>libs/mediapipe/</code>.</p>
 
-  <!-- Hidden video + canvas used by the detector -->
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="hiddenCanvas"></canvas>
 </div>
 
-<script>
-/* Debug loader + blink detector.
- * - Dynamically checks presence of local files, loads them, reports precise errors.
- * - Expects these exact files (place in repo root under 'libs/' and 'libs/mediapipe/'):
- *   libs/tf.min.js
- *   libs/face-landmarks-detection.min.js
- *   libs/mediapipe/face_mesh.js
- *   libs/mediapipe/face_mesh_solution_wasm_bin.wasm
- *   libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm
- *
- * Overwrites UI status/errorBox with specific messages so you can see what's missing.
- */
+<!-- Local libs (must be present in repo) -->
+<script src="libs/tf.min.js"></script>
+<script src="libs/face-landmarks-detection.min.js"></script>
+<script src="libs/mediapipe/face_mesh.js"></script>
 
-const REQUIRED = [
-  { url: 'libs/tf.min.js', label: 'TensorFlow (tf.min.js)' },
-  { url: 'libs/face-landmarks-detection.min.js', label: 'face-landmarks-detection UMD' },
-  { url: 'libs/mediapipe/face_mesh.js', label: 'MediaPipe face_mesh.js' },
-  { url: 'libs/mediapipe/face_mesh_solution_wasm_bin.wasm', label: 
-'face_mesh_solution_wasm_bin.wasm' },
-  { url: 'libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm', label: 
-'face_mesh_solution_simd_wasm_bin.wasm' }
-];
+<script>
+/* Start-fix version:
+   - Start button is always active (so click/tap is a direct user gesture).
+   - Reports immediate feedback to UI and debug log.
+   - Loads model AFTER camera start.
+   - Clear, defensive checks for missing scripts.
+*/
 
 const statusEl = document.getElementById('status');
 const errorBox = document.getElementById('errorBox');
-const startBtn = document.getElementById('startBtn');
-const videoEl = document.getElementById('videoEl');
-const canvas = document.getElementById('hiddenCanvas');
+const debugLog = document.getElementById('debugLog');
 const leftSq = document.getElementById('leftSq');
 const rightSq = document.getElementById('rightSq');
 const bothSq = document.getElementById('bothSq');
+const videoEl = document.getElementById('videoEl');
+const canvas = document.getElementById('hiddenCanvas');
 
-function setStatus(s){ statusEl.textContent = s; }
-function setError(s){ errorBox.textContent = s; console.warn(s); }
+function logDbg(...args){ const s = args.map(a=> (typeof a === 'object' ? JSON.stringify(a) : 
+String(a))).join(' '); debugLog.textContent += s + '\n'; console.log(...args); }
+function setStatus(s){ statusEl.textContent = s; logDbg('[STATUS]', s); }
+function setError(s){ errorBox.textContent = s; logDbg('[ERROR]', s); }
 
 function showEvent(ev){
   const COLORS = { none:'#111', left:'#ff6b6b', right:'#63c2ff', both:'#ffd36b' };
@@ -101,208 +95,113 @@ function showEvent(ev){
 }
 showEvent('none');
 
-// check files with HEAD fetch to get quick status
-async function checkFiles() {
-  setStatus('Checking local files (libs/) …');
-  const missing = [];
-  for (const f of REQUIRED) {
-    try {
-      const res = await fetch(f.url, { method: 'HEAD' });
-      if (!res.ok) missing.push({ file: f.url, status: res.status });
-    } catch (err) {
-      missing.push({ file: f.url, status: err.message });
-    }
-  }
-  return missing;
-}
+// state
+let model = null;
+let running = false;
+let closingLeft = false, closingRight = false;
+let EAR_THRESHOLD = 0.24;
 
-function loadScriptTag(src) {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.async = true;
-    s.onload = () => resolve(src);
-    s.onerror = (e) => reject(new Error('Failed to load script: ' + src));
-    document.head.appendChild(s);
-  });
-}
-
-(async function init() {
-  try {
-    const missing = await checkFiles();
-    if (missing.length) {
-      const msgs = missing.map(m => `${m.file} → ${m.status}`).join('\n');
-      setError('Missing or unreachable local files:\n' + msgs + '\n\nPlace the files in the 
-exact paths and push to GitHub Pages.');
-      return;
-    }
-
-    setStatus('All files present. Loading local scripts…');
-
-    // Load TF first
-    try {
-      await loadScriptTag('libs/tf.min.js');
-      if (!window.tf) {
-        setError('Loaded libs/tf.min.js but window.tf is not defined. File may be corrupt.');
-        return;
-      }
-    } catch (err) { setError(err.message); return; }
-
-    // Load face-landmarks UMD
-    try {
-      await loadScriptTag('libs/face-landmarks-detection.min.js');
-      if (!window.faceLandmarksDetection) {
-        setError('Loaded face-landmarks script but window.faceLandmarksDetection is not 
-defined.');
-        return;
-      }
-    } catch (err) { setError(err.message); return; }
-
-    // Load mediapipe runtime JS (face_mesh.js)
-    try {
-      await loadScriptTag('libs/mediapipe/face_mesh.js');
-      // face_mesh.js may or may not expose globals; it's OK if not; we just needed it 
-accessible at solutionPath.
-    } catch (err) { setError(err.message); return; }
-
-    setStatus('Libraries loaded locally. Press Start to enable camera.');
-    startBtn.disabled = false;
-
-    // After this point, we wire the blink detection (same logic)
-    wireBlinkDetection();
-
-  } catch (err) {
-    setError('Initialization error: ' + (err && err.message ? err.message : String(err)));
-  }
-})();
-
-function wireBlinkDetection(){
-  // parameters & state
-  let EAR_THRESHOLD = 0.24;
-  const WIDTH_IDEAL = 640, HEIGHT_IDEAL = 480;
-  let model = null;
-  let running = false;
-  let closingLeft = false, closingRight = false;
-  let lastEvent = 'none';
-
-  function bbox(points){ const xs = points.map(p=>p[0]), ys = points.map(p=>p[1]); return 
+function bbox(points){ const xs = points.map(p=>p[0]), ys = points.map(p=>p[1]); return 
 {minX:Math.min(...xs), maxX:Math.max(...xs), minY:Math.min(...ys), maxY:Math.max(...ys)}; }
 
-  async function startCameraWithFallback(){
-    setError(''); setStatus('Requesting camera (tap allow)…'); startBtn.disabled = true;
-    const tryConstraints = [
-      { video: { facingMode: 'user', width: { ideal: WIDTH_IDEAL }, height: { ideal: 
-HEIGHT_IDEAL } }, audio: false },
-      { video: { facingMode: 'user' }, audio: false },
-      { video: true, audio: false }
-    ];
-    for(const c of tryConstraints){
-      try{
-        const stream = await navigator.mediaDevices.getUserMedia(c);
-        videoEl.srcObject = stream;
-        await new Promise(r => videoEl.onloadedmetadata = r);
-        canvas.width = videoEl.videoWidth || WIDTH_IDEAL;
-        canvas.height = videoEl.videoHeight || HEIGHT_IDEAL;
-        setStatus('Camera started');
-        return stream;
-      } catch(err){
-        console.warn('getUserMedia failed for', c, err);
-        if(err.name === 'NotAllowedError' || err.name === 'SecurityError'){
-          setError('Camera permission denied. Enable camera for this site in browser/site 
-settings.');
-          startBtn.disabled = false; return null;
-        } else if(err.name === 'OverconstrainedError' || err.name === 
-'ConstraintNotSatisfiedError'){
-          setStatus('Device constraints not supported — trying fallback …'); continue;
-        } else if(err.name === 'NotReadableError' || err.name === 'TrackStartError'){
-          setError('Camera is busy/unavailable. Close other apps and try again.'); 
-startBtn.disabled = false; return null;
-        } else {
-          setError('Unable to start camera. See console for details.'); startBtn.disabled = 
-false; return null;
-        }
-      }
-    }
-    setError('Unable to access camera with any constraint set.'); startBtn.disabled = false; 
-return null;
+async function startFlow(){
+  // Immediate UI feedback to confirm button worked
+  setError(''); debugLog.textContent = ''; setStatus('Start pressed — checking libraries and 
+requesting camera...');
+
+  // quick checks
+  if(!window.tf){ setError('ERROR: TensorFlow (tf.min.js) not loaded. Check libs/tf.min.js'); 
+return; }
+  if(!window.faceLandmarksDetection){ setError('ERROR: face-landmarks-detection not loaded. 
+Check libs/face-landmarks-detection.min.js'); return; }
+  logDbg('tf', !!window.tf, 'faceLandmarksDetection', !!window.faceLandmarksDetection);
+
+  // Request camera as the user gesture
+  try{
+    setStatus('Requesting camera (user gesture)…');
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', 
+width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+    videoEl.srcObject = stream;
+    await new Promise(r => videoEl.onloadedmetadata = r);
+    canvas.width = videoEl.videoWidth || 640; canvas.height = videoEl.videoHeight || 480;
+    setStatus('Camera started — now loading model (after camera)...');
+  } catch(err){
+    setError('Camera error: ' + (err && err.name ? err.name + ' — ' + err.message : 
+String(err)));
+    return;
   }
 
-  async function loadModelAfterCamera(){
-    try{
-      setStatus('Loading face-landmarks model (MediaPipe facemesh) from local libs …');
-      model = await 
+  // Load model AFTER camera start
+  try{
+    if(!window.faceLandmarksDetection){ setError('faceLandmarksDetection not available after 
+camera.'); return; }
+    // ensure mediapipe assets are looked up in ./libs/mediapipe/
+    model = await 
 faceLandmarksDetection.load(faceLandmarksDetection.SupportedPackages.mediapipeFacemesh, {
-        runtime: 'mediapipe',
-        solutionPath: './libs/mediapipe/' // must contain face_mesh.js and the wasm binaries
-      });
-      setStatus('Model loaded — detecting blinks/winks');
-      return true;
-    } catch(err){
-      setError('Model failed to load from local libs. Error: ' + (err && err.message ? 
-err.message : String(err)) + '\nCheck browser console for network fetch errors to the wasm 
-files.');
-      console.error(err);
-      return false;
-    }
+      runtime: 'mediapipe',
+      solutionPath: './libs/mediapipe/'
+    });
+    setStatus('Model loaded — detecting blinks/winks');
+  } catch(err){
+    setError('Model load failed: ' + (err && err.message ? err.message : String(err)) + 
+'\nCheck console for fetch errors (wasm files).');
+    console.error(err);
+    return;
   }
 
-  async function detectLoop(){
-    running = true;
-    while(running){
-      try{
-        const faces = await model.estimateFaces({ input: videoEl, returnTensors: false, 
-flipHorizontal: true });
-        if(faces && faces.length){
-          const f = faces[0];
-          const leftEye = (f.annotations.leftEyeUpper0 || 
-[]).concat(f.annotations.leftEyeLower0 || []);
-          const rightEye = (f.annotations.rightEyeUpper0 || 
-[]).concat(f.annotations.rightEyeLower0 || []);
-          if(leftEye.length && rightEye.length){
-            const L = bbox(leftEye), R = bbox(rightEye);
-            const leftEAR = (L.maxY - L.minY) / (L.maxX - L.minX + 1e-6);
-            const rightEAR = (R.maxY - R.minY) / (R.maxX - R.minX + 1e-6);
-            const leftClosed = leftEAR < EAR_THRESHOLD;
-            const rightClosed = rightEAR < EAR_THRESHOLD;
-
-            if(leftClosed) closingLeft = true;
-            if(rightClosed) closingRight = true;
-
-            if(!leftClosed && !rightClosed && (closingLeft || closingRight)){
-              if(closingLeft && closingRight) lastEvent = 'both';
-              else if(closingLeft) lastEvent = 'left';
-              else if(closingRight) lastEvent = 'right';
-              else lastEvent = 'both';
-              showEvent(lastEvent);
-              setStatus(`Detected: ${lastEvent.toUpperCase()}`);
-              closingLeft = closingRight = false;
-            }
-          }
-        } else {
-          setStatus('No face detected — please face the camera');
-        }
-      } catch(err){
-        console.error('Detection error', err);
-        setError('Detection error (see console).');
-      }
-      await new Promise(r => requestAnimationFrame(r));
-    }
-  }
-
-  // Start flow: camera -> model -> detection
-  startBtn.addEventListener('click', async () => {
-    setError(''); setStatus('Starting… (camera -> model)'); startBtn.disabled = true;
-    const stream = await startCameraWithFallback();
-    if(!stream) return;
-    const ok = await loadModelAfterCamera();
-    if(!ok) return;
-    detectLoop();
-  });
-
-  // debug helpers
-  window._blinkDemo = { setEAR: v => { EAR_THRESHOLD = Number(v); console.log('EAR set', 
-EAR_THRESHOLD); }, stop: () => { running = false; } };
+  // detection loop
+  running = true;
+  detectLoop();
 }
+
+async function detectLoop(){
+  setStatus('Detecting — show squares when blink/wink happens');
+  while(running){
+    try{
+      const faces = await model.estimateFaces({ input: videoEl, returnTensors: false, 
+flipHorizontal: true });
+      if(faces && faces.length){
+        const f = faces[0];
+        const leftEye = (f.annotations.leftEyeUpper0 || 
+[]).concat(f.annotations.leftEyeLower0 || []);
+        const rightEye = (f.annotations.rightEyeUpper0 || 
+[]).concat(f.annotations.rightEyeLower0 || []);
+        if(leftEye.length && rightEye.length){
+          const L = bbox(leftEye), R = bbox(rightEye);
+          const leftEAR = (L.maxY - L.minY) / (L.maxX - L.minX + 1e-6);
+          const rightEAR = (R.maxY - R.minY) / (R.maxX - R.minX + 1e-6);
+          const leftClosed = leftEAR < EAR_THRESHOLD;
+          const rightClosed = rightEAR < EAR_THRESHOLD;
+          if(leftClosed) closingLeft = true;
+          if(rightClosed) closingRight = true;
+          if(!leftClosed && !rightClosed && (closingLeft || closingRight)){
+            let ev = 'both';
+            if(closingLeft && !closingRight) ev = 'left';
+            else if(closingRight && !closingLeft) ev = 'right';
+            showEvent(ev);
+            setStatus('Detected: ' + ev.toUpperCase());
+            closingLeft = closingRight = false;
+          }
+        }
+      } else {
+        // keep last event showing; update status
+        setStatus('No face detected — please face the camera');
+      }
+    } catch(err){
+      console.error('Detect error', err);
+      setError('Detection error: ' + (err && err.message ? err.message : String(err)));
+      // do not crash; try again next frame
+    }
+    await new Promise(r => requestAnimationFrame(r));
+  }
+}
+
+// expose helper for debugging in console
+window._blinkDemo = {
+  startFlow,
+  stop: () => { running = false; setStatus('Stopped'); },
+  setEAR: v => { EAR_THRESHOLD = Number(v); logDbg('EAR set to', EAR_THRESHOLD); }
+};
 </script>
 </body>
 </html>
