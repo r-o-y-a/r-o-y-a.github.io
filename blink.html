@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Blink Squares — Local TFJS runtime (blink.html)</title>
+<title>Blink Squares — Robust (blink.html)</title>
 <style>
   :root{--bg:#fbfbfb;--muted:#666}
   html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;color:#111}
@@ -34,28 +34,38 @@
 
   <div class="controls">
     <button id="startBtn">Start camera</button>
-    <div id="status">Click Start. This uses local files: <code>libs/tf.min.js</code> and <code>libs/face-landmarks-detection.min.js</code>.</div>
+    <div id="status">Click Start. Required local files (if used): <code>libs/tf.min.js</code> and/or MediaPipe files.</div>
   </div>
 
   <div id="errorBox" aria-live="polite"></div>
   <pre id="debugLog"></pre>
 
-  <p class="note">Place local libs at the repo paths: <code>libs/tf.min.js</code> and <code>libs/face-landmarks-detection.min.js</code>. No mediapipe files required for this build.</p>
+  <p class="note">This page will try to use MediaPipe FaceMesh (if available as <code>FaceMesh</code>) or fall back to TFJS face-landmarks. Place libs accordingly if you host locally.</p>
 
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="hiddenCanvas"></canvas>
 </div>
 
-<!-- Local libs must exist in these paths -->
-<script src="libs/tf.min.js"></script>
-<script src="libs/face-landmarks-detection.min.js"></script>
-
-<script>
-/* blink.html — TFJS runtime version.
-   REQUIRED local files:
+<!-- Optional local files (if you have them). If hosted, they should be reachable at these paths:
      libs/tf.min.js
      libs/face-landmarks-detection.min.js
-   This uses the TFJS backend (no mediapipe wasm required).
+     libs/mediapipe/face_mesh.js
+     libs/mediapipe/face_mesh_solution_wasm_bin.wasm
+     libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm
+   The script will detect what's available and choose a compatible path. -->
+
+<script>
+/*
+ Robust blink/wink detector using either:
+  - MediaPipe FaceMesh (global FaceMesh) OR
+  - TFJS face-landmarks-detection (if libs present)
+  
+ Behavior:
+  - Start camera on user gesture (Start button).
+  - Load chosen model AFTER camera start to avoid iOS permission issues.
+  - Detect left/right/both blinks by EAR using landmarks.
+  - Show persistent colored square for last event.
+  - Works on modern Chrome and Safari (desktop and mobile) when required libs are present.
 */
 
 const startBtn = document.getElementById('startBtn');
@@ -80,122 +90,352 @@ function showEvent(ev){
 }
 showEvent('none');
 
-// Defensive presence checks
-if(!window.tf){
-  setError('Missing local file: libs/tf.min.js (window.tf not found). Place TensorFlow JS at libs/tf.min.js');
+// EAR helper using 6-point eye landmark indices for MediaPipe FaceMesh
+// Indices chosen for MediaPipe (widely used):
+const LEFT_EYE_INDICES  = [33, 160, 158, 133, 153, 144];   // p1,p2,p3,p4,p5,p6
+const RIGHT_EYE_INDICES = [362,385,387,263,373,380];       // mirrored set
+
+function euclid(a,b){
+  const dx = a.x - b.x, dy = a.y - b.y;
+  return Math.hypot(dx, dy);
 }
-if(!window.faceLandmarksDetection){
-  setError('Missing local file: libs/face-landmarks-detection.min.js (window.faceLandmarksDetection not found). Place the face-landmarks-detection UMD at libs/face-landmarks-detection.min.js');
+function computeEAR(landmarks, idxs){
+  // landmarks are objects with x,y (normalized coordinates) or arrays [x,y,z]
+  const p1 = asPoint(landmarks[idxs[0]]);
+  const p2 = asPoint(landmarks[idxs[1]]);
+  const p3 = asPoint(landmarks[idxs[2]]);
+  const p4 = asPoint(landmarks[idxs[3]]);
+  const p5 = asPoint(landmarks[idxs[4]]);
+  const p6 = asPoint(landmarks[idxs[5]]);
+  const A = euclid(p2,p6);
+  const B = euclid(p3,p5);
+  const C = euclid(p1,p4);
+  if(C === 0) return 0;
+  return (A + B) / (2 * C);
+}
+function asPoint(v){
+  if(!v) return {x:0,y:0};
+  if(Array.isArray(v)) return { x: v[0], y: v[1] };
+  return { x: v.x, y: v.y };
 }
 
-// state
-let model = null;
+// Detection state
 let running = false;
 let closingLeft = false, closingRight = false;
-let EAR_THRESHOLD = 0.24;
+let lastEvent = 'none';
+let EAR_THRESHOLD = 0.18; // tuned conservatively for MediaPipe normalized coords; may tweak per device
 
-function bbox(points){ const xs = points.map(p=>p[0]), ys = points.map(p=>p[1]); return {minX:Math.min(...xs), maxX:Math.max(...xs), minY:Math.min(...ys), maxY:Math.max(...ys)}; }
+// Model objects
+let useFaceMesh = false;
+let faceMeshInstance = null;
+let tfModelInstance = null;
 
-async function requestCamera(){
-  setError(''); setStatus('Requesting camera (user gesture)…');
+// Utility: try to load optional local libs (no error if missing)
+async function tryLoadOptionalScript(src){
+  if(document.querySelector(`script[src="${src}"]`)) return true;
   try{
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
-    videoEl.srcObject = stream;
-    await new Promise(r => videoEl.onloadedmetadata = r);
-    canvas.width = videoEl.videoWidth || 640;
-    canvas.height = videoEl.videoHeight || 480;
-    setStatus('Camera started');
-    return stream;
-  } catch(err){
-    setError('Camera error: ' + (err && err.name ? err.name + ' — ' + err.message : String(err)));
-    throw err;
-  }
-}
-
-async function loadModelTFJS(){
-  setStatus('Loading face-landmarks model (TFJS runtime)…');
-  try{
-    // Use TFJS runtime. SupportedPackages.mediapipeFacemesh works when runtime:'tfjs'
-    model = await faceLandmarksDetection.load(faceLandmarksDetection.SupportedPackages.mediapipeFacemesh, {
-      runtime: 'tfjs'
-    });
-    setStatus('Model loaded (TFJS) — detecting blinks/winks');
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    document.head.appendChild(s);
+    await new Promise((res, rej) => { s.onload = res; s.onerror = () => rej(new Error('failed to load ' + src)); });
     return true;
   } catch(err){
-    setError('Model load failed (TFJS runtime). Error: ' + (err && err.message ? err.message : String(err)));
-    console.error(err);
-    throw err;
+    log('optional script not loaded:', src, err);
+    return false;
   }
 }
 
-async function detectLoop(){
-  running = true;
-  setStatus('Detecting — blink/wink will light the squares');
-  while(running){
-    try{
-      const faces = await model.estimateFaces({ input: videoEl, returnTensors: false, flipHorizontal: true });
-      if(faces && faces.length){
-        const f = faces[0];
-        const leftEye = (f.annotations.leftEyeUpper0 || []).concat(f.annotations.leftEyeLower0 || []);
-        const rightEye = (f.annotations.rightEyeUpper0 || []).concat(f.annotations.rightEyeLower0 || []);
-        if(leftEye.length && rightEye.length){
-          const L = bbox(leftEye), R = bbox(rightEye);
-          const leftEAR = (L.maxY - L.minY) / (L.maxX - L.minX + 1e-6);
-          const rightEAR = (R.maxY - R.minY) / (R.maxX - R.minX + 1e-6);
-          const leftClosed = leftEAR < EAR_THRESHOLD;
-          const rightClosed = rightEAR < EAR_THRESHOLD;
-          if(leftClosed) closingLeft = true;
-          if(rightClosed) closingRight = true;
-          if(!leftClosed && !rightClosed && (closingLeft || closingRight)){
-            let ev = 'both';
-            if(closingLeft && !closingRight) ev = 'left';
-            else if(closingRight && !closingLeft) ev = 'right';
-            showEvent(ev);
-            setStatus('Detected: ' + ev.toUpperCase());
-            closingLeft = closingRight = false;
-          }
-        }
-      } else {
-        setStatus('No face detected — please face the camera');
-      }
-    } catch(err){
-      console.error('Detection error', err);
-      setError('Detection error: ' + (err && err.message ? err.message : String(err)));
-      // continue loop
-    }
-    await new Promise(r => requestAnimationFrame(r));
-  }
-}
-
-// Main start handler
+// Core flow: start camera -> load model -> detect
 startBtn.addEventListener('click', async () => {
-  // quick guard if missing libs
-  if(!window.tf || !window.faceLandmarksDetection){
-    setError('Missing required local libs. See top of page. Aborting start.');
-    return;
-  }
   startBtn.disabled = true;
-  debugLog.textContent = '';
+  setError(''); debugLog.textContent = '';
+  setStatus('Start pressed — requesting camera (user gesture)...');
+
+  // request camera (must be user gesture)
   try{
-    await requestCamera();
-  } catch(e){
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+    videoEl.srcObject = stream;
+    await new Promise(r => (videoEl.onloadedmetadata = r));
+    setStatus('Camera started. Preparing model...');
+  } catch(err){
+    setError('Camera error: ' + (err && err.name ? err.name + ' — ' + err.message : String(err)));
     startBtn.disabled = false;
     return;
   }
-  try{
-    await loadModelTFJS();
-  } catch(e){
+
+  // Choose backend: if MediaPipe FaceMesh global exists (face_mesh.js loaded), prefer it.
+  if(window.FaceMesh && typeof window.FaceMesh === 'function'){
+    useFaceMesh = true;
+    setStatus('Using MediaPipe FaceMesh (local). Loading...');
+    try{
+      // locateFile should point to folder with face_mesh_solution_wasm_bin.wasm etc. We use './libs/mediapipe/' (user must host there)
+      faceMeshInstance = new FaceMesh({
+        locateFile: (file) => {
+          // common filenames in MediaPipe builds:
+          // 'face_mesh_solution_packed_assets_loader.js' or wasm names; we assume user placed wasm files in libs/mediapipe/
+          return './libs/mediapipe/' + file;
+        }
+      });
+      faceMeshInstance.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      faceMeshInstance.onResults(onMediaPipeResults);
+
+      // create loop that sends video frames (await for init)
+      setStatus('FaceMesh ready. Starting detection loop...');
+      running = true;
+      detectWithFaceMeshLoop();
+      return;
+    } catch(err){
+      log('FaceMesh init failed', err);
+      // fall through to try TFJS path
+      useFaceMesh = false;
+    }
+  }
+
+  // If no FaceMesh, try TFJS face-landmarks-detection model (if the UMD is loaded or can be loaded)
+  if(window.faceLandmarksDetection){
+    setStatus('Using TFJS face-landmarks-detection (local). Loading model...');
+    try{
+      // Prefer tfjs runtime model (no mediapipe wasm)
+      if(!window.tf){
+        // attempt to load tf locally from expected path — if file missing, user must host it.
+        const tried = await tryLoadOptionalScript('libs/tf.min.js');
+        if(!tried || !window.tf){
+          setError('TensorFlow (tf.min.js) not found. Place TensorFlow JS at libs/tf.min.js or include CDN.');
+          startBtn.disabled = false;
+          return;
+        }
+      }
+      // choose SupportedPackages safely
+      let pkg = (window.faceLandmarksDetection.SupportedPackages && window.faceLandmarksDetection.SupportedPackages.mediapipeFacemesh)
+                ? window.faceLandmarksDetection.SupportedPackages.mediapipeFacemesh
+                : (window.faceLandmarksDetection.SupportedPackages && window.faceLandmarksDetection.SupportedPackages.tfjs)
+                ? window.faceLandmarksDetection.SupportedPackages.tfjs
+                : null;
+      if(!pkg){
+        // try string-based fallback (some builds accept 'mediapipe_facemesh' or 'tfjs')
+        try { pkg = 'tfjs'; } catch(e){ pkg = null; }
+      }
+      if(!pkg){
+        setError('faceLandmarksDetection.SupportedPackages not available in this build. Please host compatible face-landmarks-detection UMD.');
+        startBtn.disabled = false;
+        return;
+      }
+      tfModelInstance = await faceLandmarksDetection.load(pkg, { runtime: 'tfjs' });
+      setStatus('TFJS model loaded. Starting detection loop...');
+      running = true;
+      detectWithTFJSLoop();
+      return;
+    } catch(err){
+      log('TFJS model load failed', err);
+      setError('Model load failed: ' + (err && err.message ? err.message : String(err)));
+      startBtn.disabled = false;
+      return;
+    }
+  }
+
+  // If neither global exists, try to load face-landmarks-detection UMD dynamically from local path
+  // Minimal attempt: try to load libs/face-landmarks-detection.min.js and libs/tf.min.js (user should have placed them)
+  setStatus('No face model globals found. Attempting to load local face-landmarks UMD (libs/face-landmarks-detection.min.js)...');
+  const loadedFace = await tryLoadOptionalScript('libs/face-landmarks-detection.min.js');
+  if(!loadedFace || !window.faceLandmarksDetection){
+    setError('No detection library available. Provide either MediaPipe face_mesh.js or face-landmarks-detection UMD (libs/face-landmarks-detection.min.js).');
     startBtn.disabled = false;
     return;
   }
-  detectLoop();
+  // try TFJS as above
+  if(!window.tf){
+    const tried = await tryLoadOptionalScript('libs/tf.min.js');
+    if(!tried || !window.tf){
+      setError('TensorFlow (tf.min.js) missing. Place it at libs/tf.min.js.');
+      startBtn.disabled = false;
+      return;
+    }
+  }
+  // now load TF model
+  try{
+    let pkg = (window.faceLandmarksDetection.SupportedPackages && window.faceLandmarksDetection.SupportedPackages.tfjs)
+              ? window.faceLandmarksDetection.SupportedPackages.tfjs
+              : 'tfjs';
+    tfModelInstance = await faceLandmarksDetection.load(pkg, { runtime: 'tfjs' });
+    setStatus('TFJS model loaded after dynamic load. Starting detection loop...');
+    running = true;
+    detectWithTFJSLoop();
+    return;
+  } catch(err){
+    log('final TF load failed', err);
+    setError('Final model load failed: ' + (err && err.message ? err.message : String(err)));
+    startBtn.disabled = false;
+    return;
+  }
 });
 
-// Expose small helpers in console
+// MediaPipe FaceMesh detection loop (sends frames to faceMeshInstance)
+async function detectWithFaceMeshLoop(){
+  // We push frames into faceMeshInstance.send() and rely on onResults callback
+  try{
+    while(running){
+      if(videoEl.readyState >= 2){
+        try {
+          await faceMeshInstance.send({image: videoEl});
+        } catch(e){
+          // faceMeshInstance.send may fail while wasm or assets load; log and break out
+          log('faceMesh send error', e);
+          setError('FaceMesh runtime error: ' + (e && e.message ? e.message : String(e)));
+          running = false;
+          break;
+        }
+      }
+      // throttle to animation frames
+      await new Promise(r => requestAnimationFrame(r));
+    }
+  } catch(err){
+    log('FaceMesh loop error', err);
+    setError('FaceMesh loop error: ' + (err && err.message ? err.message : String(err)));
+    running = false;
+  }
+}
+
+// MediaPipe onResults callback
+function onMediaPipeResults(results){
+  if(!results || !results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0){
+    setStatus('No face detected — please face the camera');
+    return;
+  }
+  const lm = results.multiFaceLandmarks[0]; // array of {x,y,z} or arrays
+  processLandmarksArray(lm);
+}
+
+// TFJS face-landmarks detection loop
+async function detectWithTFJSLoop(){
+  try{
+    while(running){
+      if(videoEl.readyState >= 2){
+        try {
+          const faces = await tfModelInstance.estimateFaces({input: videoEl});
+          if(faces && faces.length){
+            // face-landmarks-detection TFJS returns different structure: use .scaledMesh or .annotations
+            const f = faces[0];
+            // prefer f.scaledMesh if available (array of [x,y,z])
+            if(f.scaledMesh && f.scaledMesh.length){
+              // convert to same canonical format: array of {x,y}
+              const lm = f.scaledMesh.map(p => ({ x: p[0] / videoEl.videoWidth, y: p[1] / videoEl.videoHeight }));
+              processLandmarksArray(lm);
+            } else if(f.annotations && f.annotations.lipsUpperInner){ 
+              // some TFJS builds return annotations object — attempt to build landmarks array from annotations using known indices
+              // fallback: compute EAR from annotation points (left/right eye)
+              const lm = buildLandmarksFromAnnotations(f.annotations);
+              if(lm) processLandmarksArray(lm);
+            } else {
+              setStatus('Face detected but no landmarks accessible');
+            }
+          } else {
+            setStatus('No face detected — please face the camera');
+          }
+        } catch(e){
+          log('TFJS estimateFaces error', e);
+          setError('TFJS detection error: ' + (e && e.message ? e.message : String(e)));
+          running = false;
+          break;
+        }
+      }
+      await new Promise(r => requestAnimationFrame(r));
+    }
+  } catch(err){
+    log('TFJS loop error', err);
+    setError('TFJS loop error: ' + (err && err.message ? err.message : String(err)));
+    running = false;
+  }
+}
+
+// Process a landmarks array (MediaPipe-style landmarks: array of {x,y} or [x,y,z])
+function processLandmarksArray(landmarks){
+  try{
+    // ensure format: convert arrays to objects if needed
+    const L = landmarks.map(pt => Array.isArray(pt) ? { x: pt[0], y: pt[1] } : (pt && pt.x !== undefined ? { x: pt.x, y: pt.y } : { x: pt[0] || 0, y: pt[1] || 0 }));
+    // compute EAR using indices (MediaPipe normalized coords)
+    const leftEAR = computeEARFromPoints(L, LEFT_EYE_INDICES);
+    const rightEAR = computeEARFromPoints(L, RIGHT_EYE_INDICES);
+    // adjust threshold heuristically if necessary
+    // Determine closed flags
+    const leftClosed = leftEAR < EAR_THRESHOLD;
+    const rightClosed = rightEAR < EAR_THRESHOLD;
+
+    if(leftClosed) closingLeft = true;
+    if(rightClosed) closingRight = true;
+
+    if(!leftClosed && !rightClosed && (closingLeft || closingRight)){
+      if(closingLeft && closingRight) lastEvent = 'both';
+      else if(closingLeft) lastEvent = 'left';
+      else if(closingRight) lastEvent = 'right';
+      else lastEvent = 'both';
+      showEvent(lastEvent);
+      setStatus('Detected: ' + lastEvent.toUpperCase() + ` (L:${leftEAR.toFixed(3)} R:${rightEAR.toFixed(3)})`);
+      closingLeft = closingRight = false;
+    } else {
+      // update status with EAR values for debugging
+      setStatus(`EAR L:${leftEAR.toFixed(3)} R:${rightEAR.toFixed(3)}`);
+    }
+  } catch(err){
+    console.error('processLandmarksArray error', err);
+  }
+}
+
+function computeEARFromPoints(L, idxs){
+  // idxs are indices into L; ensure indices exist
+  const p1 = safePoint(L, idxs[0]), p2 = safePoint(L, idxs[1]), p3 = safePoint(L, idxs[2]),
+        p4 = safePoint(L, idxs[3]), p5 = safePoint(L, idxs[4]), p6 = safePoint(L, idxs[5]);
+  const A = hypotPoints(p2,p6);
+  const B = hypotPoints(p3,p5);
+  const C = hypotPoints(p1,p4) || 1e-6;
+  return (A + B) / (2 * C);
+}
+function safePoint(L, i){ return (L[i] ? L[i] : {x:0,y:0}); }
+function hypotPoints(a,b){ const dx = a.x - b.x, dy = a.y - b.y; return Math.hypot(dx,dy); }
+
+// TFJS annotation fallback builder (best-effort)
+function buildLandmarksFromAnnotations(annotations){
+  // attempt to build an approximate landmarks array where key indices exist:
+  // use eye annotations which are arrays of points; pick representative points and map to approx indices used above
+  try{
+    // annotations.leftEye and rightEye arrays available in some builds
+    const leftEyeAnn = annotations.leftEye || annotations.leftEyeUpper0 || null;
+    const rightEyeAnn = annotations.rightEye || annotations.rightEyeUpper0 || null;
+    if(!leftEyeAnn || !rightEyeAnn) return null;
+    // Build a minimal landmarks array where indices used above are present:
+    // We'll create array with length 468 filled with zeros then place points at the indices we need.
+    const L = new Array(468).fill(null).map(()=>({x:0,y:0}));
+    // Map leftEyeAnn to approximate MediaPipe indices:
+    // use leftEyeAnn[0] ~ 33, leftEyeAnn[8] ~ 133 etc. (approximate)
+    const mapLeft = [33,160,158,133,153,144];
+    const mapRight = [362,385,387,263,373,380];
+    for(let i=0;i<6;i++){
+      const p = leftEyeAnn[Math.floor(i * (leftEyeAnn.length-1)/5)];
+      if(p) L[mapLeft[i]] = { x: p[0] / videoEl.videoWidth, y: p[1] / videoEl.videoHeight };
+      const q = rightEyeAnn[Math.floor(i * (rightEyeAnn.length-1)/5)];
+      if(q) L[mapRight[i]] = { x: q[0] / videoEl.videoWidth, y: q[1] / videoEl.videoHeight };
+    }
+    return L;
+  } catch(e){
+    return null;
+  }
+}
+
+// Expose stop helper
 window._blinkDemo = {
   stop: () => { running = false; setStatus('Stopped'); },
-  setEAR: v => { EAR_THRESHOLD = Number(v); log('[DEBUG] EAR set to', EAR_THRESHOLD); }
+  setEARThreshold: (v) => { EAR_THRESHOLD = Number(v); log('EAR_THRESHOLD set to', EAR_THRESHOLD); }
 };
+
 </script>
 </body>
 </html>
