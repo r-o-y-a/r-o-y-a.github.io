@@ -3,294 +3,203 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Blink + Gaze — MediaPipe</title>
+<title>Blink — MediaPipe</title>
 <style>
   :root{--bg:#fbfbfb;--muted:#666}
-  html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;color:#111}
-  .wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;box-sizing:border-box}
-  h1{margin:0;font-size:20px;font-weight:600}
-  .squares{display:flex;gap:12px;align-items:center;justify-content:center}
-  .sq{width:110px;height:92px;border-radius:12px;background:#111;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;box-shadow:0 8px 20px rgba(12,12,12,.12);font-size:14px;transition:background-color .14s ease, transform .14s ease}
-  .sq.flash{transform:translateY(-6px) scale(1.03); box-shadow:0 18px 34px rgba(12,12,12,.18)}
-  .gazeSnip{min-width:120px;padding:8px 10px;border-radius:10px;background:#111;color:#fff;font-size:12px;text-align:center;box-shadow:0 8px 18px rgba(12,12,12,.12);transition:background-color .14s, transform .14s;opacity:.95}
-  .gazeSnip.flash{transform:translateY(-4px) scale(1.02); box-shadow:0 12px 28px rgba(12,12,12,.16)}
-  .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center}
-  #startBtn{padding:12px 18px;font-size:16px;border-radius:10px;border:0;background:#111;color:#fff;cursor:pointer}
-  /* hide the noisy UI elements (you said you only wanted to see the buttons now) */
-  #status, #errorBox, pre#debug, .note { display:none !important; }
+  html,body{
+    height:100%;
+    margin:0;
+    background:var(--bg);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+    color:#111;
+  }
+  body{display:flex;flex-direction:column;align-items:center;justify-content:flex-start}
+  .topbar{
+    width:100%;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    padding:14px 0 10px;
+    gap:8px;
+    box-sizing:border-box;
+  }
+  h1{margin:0;font-size:18px;font-weight:600;text-align:center}
+  .controls{display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap}
+  #startBtn{
+    padding:12px 18px;
+    font-size:16px;
+    border-radius:10px;
+    border:0;
+    background:#111;
+    color:#fff;
+    cursor:pointer;
+  }
+  .wrap{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:16px;
+    width:100%;
+  }
+  .sq{
+    width:110px;height:92px;
+    border-radius:12px;
+    background:#111;
+    color:#fff;
+    font-weight:700;
+    font-size:14px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    box-shadow:0 8px 20px rgba(12,12,12,.12);
+    transition:background-color .14s ease,transform .14s ease;
+  }
+  .sq.flash{transform:translateY(-6px) scale(1.03);box-shadow:0 18px 34px rgba(12,12,12,.18)}
   #videoEl{display:none}
   canvas{display:none}
-  @media (max-width:420px){ .sq{width:92px;height:74px;font-size:12px} #startBtn{font-size:15px} .gazeSnip{min-width:96px;font-size:11px} }
+  #status,#errorBox,pre#debug{display:none!important}
+  @media(max-width:420px){
+    .sq{width:92px;height:74px;font-size:12px}
+    #startBtn{font-size:15px}
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>Blink + Gaze</h1>
+  <div class="topbar">
+    <h1>Blink Detector</h1>
+    <div class="controls">
+      <button id="startBtn">Start camera</button>
+    </div>
+  </div>
 
-  <div class="squares" aria-hidden="true">
+  <div class="wrap">
     <div id="bothSq" class="sq">BOTH</div>
   </div>
 
-  <div class="controls">
-    <button id="startBtn">Start camera</button>
-    <div id="gazeSnip" class="gazeSnip" aria-hidden="true">gaze: —</div>
-  </div>
-
-  <div id="errorBox" aria-live="polite"></div>
-  <pre id="debug"></pre>
-
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="hiddenCanvas"></canvas>
-</div>
 
 <script>
-/* Behaviour:
-   - Only a BOTH square (left/right removed)
-   - On a blink event (closingLeft or closingRight occurred and then both eyes open),
-     the BOTH square flashes just as before.
-   - At the same moment the tiny gaze snippet flashes and displays:
-       L:(x,y) R:(x,y) gaze: <normalizedX>
-     where iris centers are attempted from iris landmarks (if present) or fall back to eye-contour averages.
-   - No noisy on-page logging; hidden status/debug UI.
-*/
+const startBtn=document.getElementById('startBtn');
+const bothSq=document.getElementById('bothSq');
+const videoEl=document.getElementById('videoEl');
 
-const startBtn = document.getElementById('startBtn');
-const errorBox = document.getElementById('errorBox');
-const bothSq = document.getElementById('bothSq');
-const gazeSnip = document.getElementById('gazeSnip');
-const videoEl = document.getElementById('videoEl');
-
-function setStatus(_){}          // hidden UI
-function setError(msg){ errorBox.textContent = msg; } // hidden by CSS but useful programmatically
-
-// Flash helper (works for both the big square and the tiny snippet)
-const COLORS = { none:'#111', both:'#ffd36b' };
-const flashTimeouts = new WeakMap();
-function flashElement(el, color, ms = 260){
-  if(!el) return;
-  const prev = flashTimeouts.get(el);
-  if(prev) clearTimeout(prev);
-  el.style.background = color;
+const COLORS={none:'#111',both:'#ffd36b'};
+const flashTimeouts=new WeakMap();
+function flashElement(el,color,ms=260){
+  if(!el)return;
+  const prev=flashTimeouts.get(el);
+  if(prev)clearTimeout(prev);
+  el.style.background=color;
   el.classList.add('flash');
-  const t = setTimeout(() => {
-    el.style.background = '';
+  const t=setTimeout(()=>{
+    el.style.background='';
     el.classList.remove('flash');
     flashTimeouts.delete(el);
-  }, ms);
-  flashTimeouts.set(el, t);
+  },ms);
+  flashTimeouts.set(el,t);
 }
 
-// FaceMesh indices
-const LEFT_EYE_INDICES  = [33,160,158,133,153,144];
-const RIGHT_EYE_INDICES = [362,385,387,263,373,380];
-// common iris index ranges used by many FaceMesh builds (may vary by build)
-const LEFT_IRIS_INDICES  = [468,469,470,471,472];
-const RIGHT_IRIS_INDICES = [473,474,475,476,477];
-
-function toPoint(p){ if(!p) return {x:0,y:0}; if(Array.isArray(p)) return {x:p[0], y:p[1]}; return {x:p.x, y:p.y}; }
-function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
-function meanPoint(arr){ if(arr.length===0) return {x:0,y:0}; const s = arr.reduce((acc,p)=>({x:acc.x+p.x, y:acc.y+p.y}), {x:0,y:0}); return {x:s.x/arr.length, y:s.y/arr.length}; }
-function computeEAR(landmarks, idxs){
-  const p1 = toPoint(landmarks[idxs[0]]), p2 = toPoint(landmarks[idxs[1]]), p3 = toPoint(landmarks[idxs[2]]),
-        p4 = toPoint(landmarks[idxs[3]]), p5 = toPoint(landmarks[idxs[4]]), p6 = toPoint(landmarks[idxs[5]]);
-  const A = dist(p2,p6), B = dist(p3,p5), C = dist(p1,p4) || 1e-6;
-  return (A + B) / (2 * C);
+// landmark helpers
+const LEFT_EYE_INDICES=[33,160,158,133,153,144];
+const RIGHT_EYE_INDICES=[362,385,387,263,373,380];
+function toPoint(p){if(!p)return{x:0,y:0};if(Array.isArray(p))return{x:p[0],y:p[1]};return{x:p.x,y:p.y};}
+function dist(a,b){const dx=a.x-b.x,dy=a.y-b.y;return Math.hypot(dx,dy);}
+function computeEAR(landmarks,idxs){
+  const p1=toPoint(landmarks[idxs[0]]),p2=toPoint(landmarks[idxs[1]]),p3=toPoint(landmarks[idxs[2]]),
+        p4=toPoint(landmarks[idxs[3]]),p5=toPoint(landmarks[idxs[4]]),p6=toPoint(landmarks[idxs[5]]);
+  const A=dist(p2,p6),B=dist(p3,p5),C=dist(p1,p4)||1e-6;
+  return (A+B)/(2*C);
 }
 
-// iris center attempt (use iris indices if present; otherwise fall back to eye contour average)
-function computeIrisCenter(landmarks, irisIdxs, eyeContourIdxs){
-  // prefer explicit iris indices when they're available in the landmark array
-  const haveIris = irisIdxs.every(i => !!landmarks[i]);
-  if(haveIris){
-    const pts = irisIdxs.map(i => toPoint(landmarks[i]));
-    return meanPoint(pts);
-  }
-  // fallback: average all contour points for that eye
-  const pts2 = eyeContourIdxs.map(i => toPoint(landmarks[i]));
-  return meanPoint(pts2);
-}
-
-// simple horizontal gaze estimate: normalized offset of iris center inside the eye horizontal span
-function simpleGazeX(irisCenter, eyeContourIdxs, landmarks){
-  const leftCorner = toPoint(landmarks[eyeContourIdxs[0]]); // approximate outer/inner
-  const rightCorner = toPoint(landmarks[eyeContourIdxs[3]]);
-  const eyeW = dist(leftCorner, rightCorner) || 1e-6;
-  const mid = { x: (leftCorner.x + rightCorner.x)/2, y: (leftCorner.y + rightCorner.y)/2 };
-  // normalized: roughly -0.5 .. +0.5 (left..right)
-  return (irisCenter.x - mid.x) / eyeW;
-}
-
-// locateFile mapper: maps requested asset filenames to your hosted wasm files
+// file mapper
 function locateFileMapper(file){
-  const lname = String(file).toLowerCase();
-  if(lname.includes('simd') && lname.includes('.wasm')) {
+  const lname=String(file).toLowerCase();
+  if(lname.includes('simd')&&lname.includes('.wasm'))
     return '/libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm';
-  }
-  if(lname.includes('.wasm')) {
+  if(lname.includes('.wasm'))
     return '/libs/mediapipe/face_mesh_solution_wasm_bin.wasm';
-  }
-  return '/libs/mediapipe/' + file;
+  return '/libs/mediapipe/'+file;
 }
 
-// main flow
-let faceMeshInstance = null;
-let running = false;
-let closingLeft = false, closingRight = false;
-let EAR_THRESHOLD = 0.18;
+// vars
+let faceMeshInstance=null;
+let running=false;
+let closingLeft=false,closingRight=false;
+let EAR_THRESHOLD=0.18;
 
 async function ensureFaceMeshClass(){
-  setStatus('loading');
+  if(window.FaceMesh&&typeof window.FaceMesh==='function')return window.FaceMesh;
   try{
-    if(window.FaceMesh && typeof window.FaceMesh === 'function') return window.FaceMesh;
-    const existing = document.querySelector('script[data-our-facemesh]');
-    if(!existing){
-      await new Promise((resolve, reject) => {
-        const s = document.createElement('script');
-        s.src = '/libs/face_mesh.js';
-        s.async = true;
-        s.setAttribute('data-our-facemesh','1');
-        s.onload = () => resolve();
-        s.onerror = () => reject(new Error('script load failed'));
-        document.head.appendChild(s);
-      });
-      if(window.FaceMesh && typeof window.FaceMesh === 'function') return window.FaceMesh;
-    }
-  } catch(e){}
-  // try dynamic import
-  try{
-    const mod = await import('/libs/face_mesh.js');
-    const candidates = [mod.default, mod.FaceMesh, mod.MPFaceMesh, mod.FaceMeshModule];
-    for(const c of candidates) if(typeof c === 'function') return c;
-    if(typeof mod === 'function') return mod;
-    throw new Error('No FaceMesh export found in module');
-  } catch(err){
-    throw new Error('Could not load FaceMesh class from /libs/face_mesh.js. Ensure file and wasm files are at /libs/mediapipe/');
-  }
+    await new Promise((res,rej)=>{
+      const s=document.createElement('script');
+      s.src='/libs/face_mesh.js';s.async=true;
+      s.onload=res;s.onerror=rej;
+      document.head.appendChild(s);
+    });
+    if(window.FaceMesh)return window.FaceMesh;
+  }catch(e){}
+  const mod=await import('/libs/face_mesh.js');
+  const cands=[mod.default,mod.FaceMesh,mod.MPFaceMesh,mod.FaceMeshModule];
+  for(const c of cands)if(typeof c==='function')return c;
+  throw new Error('FaceMesh not found');
 }
 
 async function initFaceMesh(ClassFaceMesh){
-  setStatus('init');
-  faceMeshInstance = new ClassFaceMesh({ locateFile: (file) => locateFileMapper(file) });
+  faceMeshInstance=new ClassFaceMesh({locateFile:(f)=>locateFileMapper(f)});
   faceMeshInstance.setOptions({
-    maxNumFaces: 1,
-    refineLandmarks: true,
-    minDetectionConfidence: 0.5,
-    minTrackingConfidence: 0.5
+    maxNumFaces:1,
+    refineLandmarks:true,
+    minDetectionConfidence:0.5,
+    minTrackingConfidence:0.5
   });
   faceMeshInstance.onResults(onFaceMeshResults);
 }
 
-function onFaceMeshResults(results){
-  if(!results || !results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) return;
-  processLandmarks(results.multiFaceLandmarks[0]);
-}
-
-function processLandmarks(landmarks){
-  try{
-    // compute EARs for blink logic
-    const leftEAR = computeEAR(landmarks, LEFT_EYE_INDICES);
-    const rightEAR = computeEAR(landmarks, RIGHT_EYE_INDICES);
-    const leftClosed = leftEAR < EAR_THRESHOLD;
-    const rightClosed = rightEAR < EAR_THRESHOLD;
-    if(leftClosed) closingLeft = true;
-    if(rightClosed) closingRight = true;
-
-    // compute iris centers & simple gaze X (attempt iris indices, otherwise contour)
-    const leftIris = computeIrisCenter(landmarks, LEFT_IRIS_INDICES, LEFT_EYE_INDICES);
-    const rightIris = computeIrisCenter(landmarks, RIGHT_IRIS_INDICES, RIGHT_EYE_INDICES);
-    const leftGazeX = simpleGazeX(leftIris, LEFT_EYE_INDICES, landmarks);
-    const rightGazeX = simpleGazeX(rightIris, RIGHT_EYE_INDICES, landmarks);
-    const gazeXAvg = (leftGazeX + rightGazeX) / 2;
-
-    // When eyes re-open after any closing action -> trigger event
-    if(!leftClosed && !rightClosed && (closingLeft || closingRight)){
-      // previously we distinguished left/right/both; user requested only BOTH UI,
-      // so flash the BOTH square regardless of which eye closed.
-      flashElement(bothSq, COLORS.both);
-
-      // prepare gaze snippet text (normalized coordinates, 3 decimals)
-      const l = `L:${leftIris.x.toFixed(3)},${leftIris.y.toFixed(3)}`;
-      const r = `R:${rightIris.x.toFixed(3)},${rightIris.y.toFixed(3)}`;
-      const g = `g:${gazeXAvg.toFixed(3)}`;
-      gazeSnip.textContent = `${l} ${r} ${g}`;
-      // flash the small snippet with same color/behavior as BOTH
-      flashElement(gazeSnip, COLORS.both, 360);
-
-      // reset closing flags
-      closingLeft = closingRight = false;
-      return;
-    }
-
-    // otherwise do nothing visual (we keep UI minimal)
-  } catch(e){
-    console.error('processLandmarks error', e);
+function onFaceMeshResults(res){
+  if(!res||!res.multiFaceLandmarks||res.multiFaceLandmarks.length===0)return;
+  const lm=res.multiFaceLandmarks[0];
+  const leftEAR=computeEAR(lm,LEFT_EYE_INDICES);
+  const rightEAR=computeEAR(lm,RIGHT_EYE_INDICES);
+  const leftClosed=leftEAR<EAR_THRESHOLD;
+  const rightClosed=rightEAR<EAR_THRESHOLD;
+  if(leftClosed)closingLeft=true;
+  if(rightClosed)closingRight=true;
+  if(!leftClosed&&!rightClosed&&(closingLeft||closingRight)){
+    flashElement(bothSq,COLORS.both);
+    closingLeft=closingRight=false;
   }
 }
 
 async function detectLoop(){
-  running = true;
-  try{
-    while(running){
-      if(videoEl.readyState >= 2 && faceMeshInstance){
-        try{
-          await faceMeshInstance.send({image: videoEl});
-        } catch(e){
-          setError('FaceMesh runtime error');
-          running = false;
-          break;
-        }
-      }
-      await new Promise(r => requestAnimationFrame(r));
+  running=true;
+  while(running){
+    if(videoEl.readyState>=2&&faceMeshInstance){
+      await faceMeshInstance.send({image:videoEl});
     }
-  } catch(err){
-    setError('Detection loop error');
+    await new Promise(r=>requestAnimationFrame(r));
   }
 }
 
-// Start button
-startBtn.addEventListener('click', async () => {
-  startBtn.disabled = true;
-  setError('');
-  setStatus('starting');
-
+startBtn.addEventListener('click',async()=>{
+  startBtn.disabled=true;
   try{
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-      audio: false
+    const stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},
+      audio:false
     });
-    videoEl.srcObject = stream;
-    await new Promise(r => (videoEl.onloadedmetadata = r));
-  } catch(err){
-    setError('Camera error');
-    startBtn.disabled = false;
-    return;
-  }
-
-  let FaceMeshClass = null;
+    videoEl.srcObject=stream;
+    await new Promise(r=>(videoEl.onloadedmetadata=r));
+  }catch(err){alert('Camera error');startBtn.disabled=false;return;}
   try{
-    FaceMeshClass = await ensureFaceMeshClass();
-    if(!FaceMeshClass) throw new Error('FaceMesh class not found');
-  } catch(err){
-    setError('FaceMesh load error');
-    startBtn.disabled = false;
-    return;
-  }
-
-  try{
+    const FaceMeshClass=await ensureFaceMeshClass();
     await initFaceMesh(FaceMeshClass);
     await detectLoop();
-  } catch(err){
-    setError('Initialization failed');
-    startBtn.disabled = false;
-    return;
-  }
+  }catch(err){alert('Init failed');startBtn.disabled=false;}
 });
-
-// minimal helpers
-window._blink = {
-  stop: () => { running = false; setStatus('stopped'); },
-  EAR: (v) => { EAR_THRESHOLD = Number(v); }
-};
 </script>
 </body>
 </html>
