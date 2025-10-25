@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Blink Squares — Left / Right / Both</title>
+<style>
+  html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;}
+  .wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:20px;padding:20px;box-sizing:border-box}
+  .squares{display:flex;gap:12px;align-items:center}
+  .sq{width:90px;height:90px;border-radius:8px;background:#111;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+  .sq.small{width:70px;height:70px}
+  #status{font-size:15px;color:#333;opacity:.9}
+  #startBtn{padding:10px 18px;font-size:16px;border-radius:8px;border:0;background:#111;color:#fff;cursor:pointer}
+  .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center}
+  /* visible only for debugging if needed */
+  #videoEl{display:none; width:320px;height:240px;}
+  canvas{display:none}
+  .note{font-size:13px;color:#666;max-width:520px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Blink Squares (Left / Right / Both)</h2>
+
+  <div class="squares">
+    <div id="leftSq" class="sq">LEFT</div>
+    <div id="bothSq" class="sq">BOTH</div>
+    <div id="rightSq" class="sq">RIGHT</div>
+  </div>
+
+  <div class="controls">
+    <button id="startBtn">Start camera</button>
+    <div id="status">Press Start, allow camera. Good lighting & front camera improves reliability.</div>
+  </div>
+
+  <p class="note">The colored square updates when a blink / wink is detected and holds until the next event.<br>
+  Works locally in the browser (no upload). If the page doesn't show camera, try serving with <code>python -m http.server</code>.</p>
+
+  <!-- Hidden elements used by the detector -->
+  <video id="videoEl" autoplay playsinline muted></video>
+  <canvas id="hiddenCanvas"></canvas>
+</div>
+
+<!-- TensorFlow.js and face-landmarks-detection (MediaPipe) -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.0.3/dist/face-landmarks-detection.min.js"></script>
+
+<script>
+(async function(){
+  const startBtn = document.getElementById('startBtn');
+  const status = document.getElementById('status');
+  const videoEl = document.getElementById('videoEl');
+  const canvas = document.getElementById('hiddenCanvas');
+  const leftSq = document.getElementById('leftSq');
+  const rightSq = document.getElementById('rightSq');
+  const bothSq = document.getElementById('bothSq');
+
+  // Colors for events
+  const COLORS = {
+    none: '#111',
+    left: '#ff7b7b',
+    right: '#7bcfff',
+    both: '#ffd37b'
+  };
+
+  // Helper: set squares visual state
+  function showEvent(ev){
+    leftSq.style.background = ev === 'left' ? COLORS.left : COLORS.none;
+    rightSq.style.background = ev === 'right' ? COLORS.right : COLORS.none;
+    bothSq.style.background = ev === 'both' ? COLORS.both : COLORS.none;
+  }
+  showEvent('none');
+
+  // EAR threshold — tweak if needed per device/person
+  const EAR_THRESHOLD = 0.25; // typical range 0.18 - 0.28
+  const BLINK_MIN_FRAMES = 1; // minimum frames below threshold to count
+  // keep last event so it stays until next
+  let lastEvent = 'none';
+
+  // Load model (MediaPipe facemesh via TF.js)
+  status.textContent = 'Loading model...';
+  const model = await faceLandmarksDetection.load(faceLandmarksDetection.SupportedPackages.mediapipeFacemesh);
+  status.textContent = 'Model loaded — press Start';
+
+  // start camera on user gesture
+  startBtn.addEventListener('click', async ()=>{
+    startBtn.disabled = true;
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+      videoEl.srcObject = stream;
+      await videoEl.play();
+      // size canvas to video
+      canvas.width = videoEl.videoWidth || 640;
+      canvas.height = videoEl.videoHeight || 480;
+      status.textContent = 'Camera running — detecting...';
+      detectLoop();
+    }catch(err){
+      console.error(err);
+      status.textContent = 'Camera access denied or unavailable.';
+      startBtn.disabled = false;
+    }
+  });
+
+  // small helper to compute bounding box
+  function bbox(points){
+    const xs = points.map(p=>p[0]), ys = points.map(p=>p[1]);
+    return {minX:Math.min(...xs), maxX:Math.max(...xs), minY:Math.min(...ys), maxY:Math.max(...ys)};
+  }
+
+  // detection loop
+  async function detectLoop(){
+    const ctx = canvas.getContext('2d');
+    let blinkFrames = 0;
+    let loop = async ()=> {
+      // estimate faces
+      const faces = await model.estimateFaces({input: videoEl, returnTensors: false, flipHorizontal: false});
+      if(faces && faces.length>0){
+        const f = faces[0];
+        // Use annotations for eyes (MediaPipe provides good annotations)
+        const leftEye = (f.annotations.leftEyeUpper0 || []).concat(f.annotations.leftEyeLower0 || []);
+        const rightEye = (f.annotations.rightEyeUpper0 || []).concat(f.annotations.rightEyeLower0 || []);
+        // fallback if annotations missing
+        if(!leftEye.length || !rightEye.length){
+          requestAnimationFrame(loop);
+          return;
+        }
+        // compute EAR-like metric using bounding boxes (simple and robust)
+        const L = bbox(leftEye), R = bbox(rightEye);
+        const leftEAR = (L.maxY - L.minY) / (L.maxX - L.minX + 1e-6);
+        const rightEAR = (R.maxY - R.minY) / (R.maxX - R.minX + 1e-6);
+        // decide closed/open
+        const leftClosed = leftEAR < EAR_THRESHOLD;
+        const rightClosed = rightEAR < EAR_THRESHOLD;
+
+        // Detect events:
+        // if both closed => both blink
+        // if only left closed => left wink (or left blink)
+        // if only right closed => right wink
+        // require at least BLINK_MIN_FRAMES consecutive frames below threshold to avoid false positives
+        if(leftClosed || rightClosed){
+          blinkFrames++;
+        } else {
+          if(blinkFrames >= BLINK_MIN_FRAMES){
+            // Determine which eye(s) were closed in the moment preceding opening.
+            // Slightly more robust: check last known closed flags (we can capture them during frames)
+            // For simplicity we recompute using current values: if leftEAR was low and rightEAR low => both
+            if(leftClosed && rightClosed){
+              lastEvent = 'both';
+            } else if(leftClosed && !rightClosed){
+              lastEvent = 'left';
+            } else if(!leftClosed && rightClosed){
+              lastEvent = 'right';
+            } else {
+              // fallback: check which ear was lower
+              lastEvent = (leftEAR < rightEAR) ? 'left' : (rightEAR < leftEAR) ? 'right' : 'both';
+            }
+            showEvent(lastEvent);
+            status.textContent = `Detected: ${lastEvent.toUpperCase()}`;
+          }
+          blinkFrames = 0;
+        }
+
+      } else {
+        // no face
+        // keep lastEvent visible
+        // optionally update status
+      }
+      requestAnimationFrame(loop);
+    };
+    loop();
+  }
+
+  // initial note
+  status.textContent = 'Click Start to enable camera. Good frontal lighting helps detection.';
+})();
+</script>
+</body>
+</html>
