@@ -54,7 +54,7 @@
 /* ======= CONFIG ======= */
 const SMOOTH_ALPHA = 0.18, DEV_THRESHOLD_PX = 8, DEV_PERSIST = 3, MAX_DEV_FOR_RATE = 80,
       STUTTER_RATE_MIN = 6, STUTTER_RATE_MAX = 22, STUTTER_DUTY = 0.5;
-// Default synth base frequency (A3 from your cristal tuning)
+// Default synth base frequency (using user's cristal A3 reference ~220.25 Hz)
 const DEFAULT_FREQ = 220.25;
 /* ====================== */
 
@@ -110,17 +110,22 @@ function startPlayback(){
     src.start();
   } else {
     // build simple synth:
+    // osc1 = primary sine, osc2 = harmonic / detuned for richness
     osc1 = audioCtx.createOscillator();
     osc2 = audioCtx.createOscillator();
+    // create a small harmonic/partial: second oscillator = 2x freq but detuned a little
     osc1.type = 'sine';
     osc2.type = 'sine';
     osc1.frequency.value = DEFAULT_FREQ;
     osc2.frequency.value = DEFAULT_FREQ * 2; // harmonic
     osc2.detune.value = -6; // slight detune for beating
+    // synth gain controls combined level
     synthGain = audioCtx.createGain(); synthGain.gain.value = 0.6;
+    // chain: osc1 + osc2 -> synthGain -> distortion -> ...
     osc1.connect(synthGain);
     osc2.connect(synthGain);
     synthGain.connect(distortion);
+    // start oscillators
     osc1.start();
     osc2.start();
   }
@@ -129,19 +134,18 @@ function startPlayback(){
 
 /* Stop playback / cleanup nodes */
 function stopPlayback(){
+  // stop buffer source
   try{ if (src){ src.stop(0); src.disconnect(); } }catch(e){}
   src = null;
+  // stop synth oscillators
   try{ if (osc1){ osc1.stop(0); osc1.disconnect(); } }catch(e){}
   try{ if (osc2){ osc2.stop(0); osc2.disconnect(); } }catch(e){}
   osc1 = null; osc2 = null;
   if (synthGain){ try{ synthGain.disconnect(); }catch(e){} synthGain = null; }
 
+  // clear stutter & reset audio graph pieces
   clearStutter();
-  // disconnect common chain
-  try{ if (distortion) distortion.disconnect(); }catch(e){} distortion = null;
-  try{ if (filter) filter.disconnect(); }catch(e){} filter = null;
-  try{ if (chopGain) chopGain.disconnect(); }catch(e){} chopGain = null;
-  try{ if (masterGain) masterGain.disconnect(); }catch(e){} masterGain = null;
+  distortion = null; filter = null; chopGain = null; masterGain = null;
 
   glitching = false; devCounter = 0; lastY = null; trendY = null;
   rod.classList.remove('playing'); rod.classList.remove('glitch');
@@ -152,8 +156,10 @@ function engageGlitch(rateHz, strength){
   if (glitching) return;
   glitching = true;
   rod.classList.add('glitch');
+  // set distortion strength and lower filter cutoff based on strength
   if (distortion) distortion.curve = makeDistortion(strength).curve;
   if (filter) filter.frequency.setTargetAtTime(4000 + (1-strength)*8000, audioCtx.currentTime, 0.04);
+  // start stutter (toggling chopGain)
   startStutter(rateHz);
 }
 
@@ -175,6 +181,7 @@ function startStutter(rateHz){
   chopGain.gain.setValueAtTime(1, audioCtx.currentTime);
   stutterTimer = setInterval(()=>{
     on = !on;
+    // faster timing uses setValueAtTime to minimize jitter effect
     chopGain.gain.setValueAtTime(on ? 1 : 0, audioCtx.currentTime);
   }, periodMs * STUTTER_DUTY);
 }
@@ -191,32 +198,32 @@ function mapDevToParams(absDev){
   return { rateHz: rate, strength: t };
 }
 
-/* Normalized prevent (safe for both Event and our tiny touch proxies) */
-function normalizedPrevent(e){
-  try{ if (e && typeof e.preventDefault === 'function') e.preventDefault(); }catch(e){}
-}
-
-/* POINTER / TOUCH HANDLING: robust so a direct touch on the rod resumes audio */
+/* POINTER / TOUCH HANDLING */
 function onPointerDown(e){
-  normalizedPrevent(e);
+  e.preventDefault();
   ensureAudioCtx();
-  try{ if (audioCtx.state === 'suspended') audioCtx.resume(); }catch(e){}
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  // usingSynth is true when no uploaded buffer exists
   usingSynth = !buffer;
+
+  // when no buffer and using synth, we can start immediately
   active = true;
-  const y = (e && (e.clientY !== undefined)) ? e.clientY : (e && e.touches && e.touches[0] && e.touches[0].clientY);
+  const y = e.clientY ?? (e.touches && e.touches[0] && e.touches[0].clientY);
   trendY = y; lastY = y; devCounter = 0; glitching = false;
   startPlayback();
-  if (e && e.pointerId && rod.setPointerCapture){
+
+  if (e.pointerId && rod.setPointerCapture) {
     try{ rod.setPointerCapture(e.pointerId); }catch(o){}
   }
 }
 
 function onPointerMove(e){
   if (!active) return;
-  const y = (e && (e.clientY !== undefined)) ? e.clientY : (e && e.touches && e.touches[0] && e.touches[0].clientY);
+  const y = e.clientY ?? (e.touches && e.touches[0] && e.touches[0].clientY);
   if (y == null) return;
   trendY += SMOOTH_ALPHA * (y - trendY);
   const deviation = y - trendY, absDev = Math.abs(deviation);
+
   if (absDev > DEV_THRESHOLD_PX) devCounter = Math.min(DEV_PERSIST + 10, devCounter + 1);
   else devCounter = Math.max(0, devCounter - 1);
 
@@ -226,61 +233,23 @@ function onPointerMove(e){
   } else if (glitching && devCounter < 1){
     clearGlitch();
   } else if (glitching){
+    // update stutter & distortion dynamically
     const p = mapDevToParams(absDev);
     if (stutterTimer) startStutter(p.rateHz);
     if (distortion) distortion.curve = makeDistortion(p.strength).curve;
     if (filter) filter.frequency.setTargetAtTime(4000 + (1-p.strength)*8000, audioCtx.currentTime, 0.03);
   }
+
   lastY = y;
 }
 
 function onPointerUp(e){
-  normalizedPrevent(e);
   active = false;
   stopPlayback();
-  if (e && e.pointerId && rod.releasePointerCapture){
+  if (e.pointerId && rod.releasePointerCapture) {
     try{ rod.releasePointerCapture(e.pointerId); }catch(o){}
   }
 }
-
-/* ---------- Touch wrappers (fixed) ----------
-   Call preventDefault on the real TouchEvent and pass a small normalized object into handlers.
-   This ensures a single direct touch on the rod will act as a valid user gesture for AudioContext.
-*/
-rod.addEventListener('touchstart', (ev) => {
-  // prevent scrolling and ensure this counts as the user gesture
-  ev.preventDefault();
-  const t = ev.changedTouches[0];
-  onPointerDown({
-    clientY: t ? t.clientY : undefined,
-    pointerId: undefined,
-    preventDefault: ()=>{}
-  });
-}, { passive:false });
-
-window.addEventListener('touchmove', (ev) => {
-  // we want to prevent page scrolling while touching the rod
-  ev.preventDefault();
-  const t = ev.touches[0];
-  onPointerMove({
-    clientY: t ? t.clientY : undefined
-  });
-}, { passive:false });
-
-window.addEventListener('touchend', (ev) => {
-  ev.preventDefault();
-  onPointerUp({ pointerId: undefined });
-}, { passive:false });
-
-window.addEventListener('touchcancel', (ev) => {
-  ev.preventDefault();
-  onPointerUp({});
-}, { passive:false });
-
-/* pointer & mouse events */
-rod.addEventListener('pointerdown', onPointerDown);
-window.addEventListener('pointermove', onPointerMove);
-window.addEventListener('pointerup', onPointerUp);
 
 /* FILE UPLOAD HANDLING (upload overrides synth) */
 fileInput.addEventListener('change', async (ev)=>{
@@ -293,6 +262,7 @@ async function loadFile(file){
   ensureAudioCtx();
   try{
     const ab = await file.arrayBuffer();
+    // decode audio (promise-style; works in modern browsers)
     buffer = await audioCtx.decodeAudioData(ab);
     fileLabel.textContent = file.name;
     usingSynth = !buffer;
@@ -308,7 +278,16 @@ async function loadFile(file){
 /* drag-drop onto rod */
 rod.addEventListener('dragover', (e)=>{ e.preventDefault(); rod.style.opacity = 0.9; });
 rod.addEventListener('dragleave', ()=>{ rod.style.opacity = ''; });
-rod.addEventListener('drop', async (e)=>{ e.preventDefault(); rod.style.opacity = ''; const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) await loadFile(f); });
+rod.addEventListener('drop', async (e)=>{ e.preventDefault(); rod.style.opacity = ''; const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) await loadFile(f); });
+
+/* pointer & touch listeners */
+rod.addEventListener('pointerdown', onPointerDown);
+window.addEventListener('pointermove', onPointerMove);
+window.addEventListener('pointerup', onPointerUp);
+rod.addEventListener('touchstart', (ev)=>onPointerDown(ev.changedTouches[0]));
+window.addEventListener('touchmove', (ev)=>onPointerMove(ev.changedTouches[0]), {passive:false});
+window.addEventListener('touchend', (ev)=>onPointerUp(ev.changedTouches[0]));
+window.addEventListener('touchcancel', (ev)=>onPointerUp(ev.changedTouches[0]));
 
 /* open file dialog when pressing button */
 document.getElementById('btn').addEventListener('click', ()=>fileInput.click());
