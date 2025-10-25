@@ -1,50 +1,246 @@
-async function startCameraWithFallback() {
-  const statusEl = document.getElementById('status'); // optional UI element
-  statusEl && (statusEl.textContent = 'Requesting camera (tap allow)…');
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Blink Squares — Left / Right / Both (GitHub Pages)</title>
+<style>
+  :root{--bg:#fbfbfb;--muted:#666;--card:#111}
+  html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;color:#111}
+  .wrap{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:20px;box-sizing:border-box}
+  h1{margin:0;font-size:20px;font-weight:600}
+  .squares{display:flex;gap:12px;align-items:center;justify-content:center}
+  .sq{width:92px;height:92px;border-radius:12px;background:#111;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;box-shadow:0 8px 20px rgba(12,12,12,.12);font-size:14px}
+  .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center}
+  #startBtn{padding:12px 16px;font-size:16px;border-radius:10px;border:0;background:#111;color:#fff;cursor:pointer}
+  #status{font-size:13px;color:var(--muted);max-width:720px;text-align:center}
+  #errorBox{font-size:13px;color:#b00020;max-width:720px;text-align:center;white-space:pre-wrap}
+  #videoEl{display:none;width:320px;height:240px}
+  canvas{display:none}
+  .note{font-size:13px;color:var(--muted);max-width:640px;text-align:center}
+  .small{font-size:12px;color:var(--muted)}
+  @media (max-width:420px){
+    .sq{width:74px;height:74px;font-size:12px;border-radius:10px}
+    #startBtn{font-size:15px;padding:10px 14px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Blink Squares — Left / Right / Both</h1>
 
-  // first try simple, robust constraints
-  const tryConstraints = [
-    { video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } },
-    { video: true } // fallback
-  ];
+  <div class="squares" aria-hidden="true">
+    <div id="leftSq" class="sq" aria-label="left">LEFT</div>
+    <div id="bothSq" class="sq" aria-label="both">BOTH</div>
+    <div id="rightSq" class="sq" aria-label="right">RIGHT</div>
+  </div>
 
-  for (const c of tryConstraints) {
-    try {
-      // MUST be called inside a user gesture (click/tap)
-      const stream = await navigator.mediaDevices.getUserMedia(c);
-      // success
-      const video = document.getElementById('videoEl');
-      if (video) {
-        video.srcObject = stream;
-        await video.play().catch(()=>{ /* some browsers require playsinline/muted for autoplay */ });
-      }
-      statusEl && (statusEl.textContent = 'Camera started');
-      return stream;
-    } catch (err) {
-      console.warn('getUserMedia error for', c, err);
-      // show friendly message
-      if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
-        statusEl && (statusEl.textContent = 'Camera permission denied — open Safari site settings (tap aA → Website Settings) and allow Camera for this site.');
-        // stop trying further — user/UA blocked
-        return null;
-      } else if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
-        // try next fallback constraint
-        statusEl && (statusEl.textContent = 'Device constraints not supported — falling back...');
-        continue;
-      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-        statusEl && (statusEl.textContent = 'Camera is busy or unavailable. Close other apps/tabs and try again.');
-        return null;
-      } else {
-        statusEl && (statusEl.textContent = `Camera error: ${err.name}. See console for details.`);
-        return null;
+  <div class="controls">
+    <button id="startBtn" aria-label="Start camera">Start camera</button>
+    <div id="status">Press Start and allow camera. Good frontal lighting improves detection.</div>
+  </div>
+
+  <div id="errorBox" aria-live="polite"></div>
+
+  <p class="note small">Runs fully in your browser (no uploads). If camera fails on iOS: ensure you opened the page in Safari (not a standalone PWA), allow camera via the site settings (tap aA → Website Settings), and use HTTPS (GitHub Pages is HTTPS). For debugging, open DevTools console or use a Mac & Safari Develop → [device].</p>
+
+  <!-- Hidden video + canvas used by the detector -->
+  <video id="videoEl" autoplay playsinline muted></video>
+  <canvas id="hiddenCanvas"></canvas>
+</div>
+
+<!-- TF.js + face-landmarks-detection (MediaPipe facemesh) -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.0.3/dist/face-landmarks-detection.min.js"></script>
+
+<script>
+/*
+  Full, self-contained blink/wink detector for GitHub Pages + mobile.
+  - Camera must be requested in a user gesture (Start button)
+  - Model loaded after camera to avoid iOS permission hangs
+  - Clear error messages visible in UI
+*/
+
+(async function(){
+  // UI elements
+  const startBtn = document.getElementById('startBtn');
+  const statusEl = document.getElementById('status');
+  const errorBox = document.getElementById('errorBox');
+  const videoEl = document.getElementById('videoEl');
+  const canvas = document.getElementById('hiddenCanvas');
+  const leftSq = document.getElementById('leftSq');
+  const rightSq = document.getElementById('rightSq');
+  const bothSq = document.getElementById('bothSq');
+
+  // Colors for events
+  const COLORS = { none:'#111', left:'#ff6b6b', right:'#63c2ff', both:'#ffd36b' };
+  function showEvent(ev){
+    leftSq.style.background = ev === 'left' ? COLORS.left : COLORS.none;
+    rightSq.style.background = ev === 'right' ? COLORS.right : COLORS.none;
+    bothSq.style.background = ev === 'both' ? COLORS.both : COLORS.none;
+  }
+  showEvent('none');
+
+  // Parameters (tweak if needed)
+  let EAR_THRESHOLD = 0.24; // lower = less sensitive
+  const WIDTH_IDEAL = 640, HEIGHT_IDEAL = 480;
+
+  // state
+  let model = null;
+  let running = false;
+  let closingLeft = false, closingRight = false;
+  let lastEvent = 'none';
+
+  // helper: show friendly errors in UI and console
+  function showError(msg, err){
+    const full = (err && err.name) ? `${err.name}: ${err.message || ''}` : (err ? String(err) : '');
+    errorBox.textContent = (msg ? msg + '\n' : '') + full;
+    console.warn(msg, err);
+  }
+
+  // bbox helper for points
+  function bbox(points){
+    const xs = points.map(p=>p[0]), ys = points.map(p=>p[1]);
+    return {minX:Math.min(...xs), maxX:Math.max(...xs), minY:Math.min(...ys), maxY:Math.max(...ys)};
+  }
+
+  // start camera with fallbacks and robust messaging
+  async function startCameraWithFallback(){
+    errorBox.textContent = '';
+    statusEl.textContent = 'Requesting camera (tap allow)…';
+    startBtn.disabled = true;
+    const tryConstraints = [
+      { video: { facingMode: 'user', width: { ideal: WIDTH_IDEAL }, height: { ideal: HEIGHT_IDEAL } }, audio: false },
+      { video: { facingMode: 'user' }, audio: false },
+      { video: true, audio: false }
+    ];
+    for(const c of tryConstraints){
+      try{
+        const stream = await navigator.mediaDevices.getUserMedia(c);
+        // success — bind to video
+        videoEl.srcObject = stream;
+        await new Promise(r => videoEl.onloadedmetadata = r);
+        // size canvas for model
+        canvas.width = videoEl.videoWidth || WIDTH_IDEAL;
+        canvas.height = videoEl.videoHeight || HEIGHT_IDEAL;
+        statusEl.textContent = 'Camera started';
+        return stream;
+      } catch(err){
+        console.warn('getUserMedia error for constraints', c, err);
+        // handle common errors
+        if(err.name === 'NotAllowedError' || err.name === 'SecurityError'){
+          showError('Camera permission denied. To enable: in Safari tap aA → Website Settings → Camera → Allow, or go to iOS Settings → Safari → Camera.', err);
+          startBtn.disabled = false;
+          return null;
+        } else if(err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError'){
+          // try next fallback
+          statusEl.textContent = 'Device constraints not supported — trying fallback…';
+          continue;
+        } else if(err.name === 'NotReadableError' || err.name === 'TrackStartError'){
+          showError('Camera is busy or unavailable. Close other apps using camera and try again.', err);
+          startBtn.disabled = false;
+          return null;
+        } else {
+          // unknown error; show and abort
+          showError('Unable to start camera.', err);
+          startBtn.disabled = false;
+          return null;
+        }
       }
     }
+    showError('Unable to access camera with any constraint set.');
+    startBtn.disabled = false;
+    return null;
   }
-  statusEl && (statusEl.textContent = 'Unable to start camera.');
-  return null;
-}
 
-// usage: call inside a click handler
-document.getElementById('startBtn').addEventListener('click', async (e) => {
-  await startCameraWithFallback();
-});
+  async function loadModelAfterCamera(){
+    try{
+      statusEl.textContent = 'Loading model (this may take a few seconds)…';
+      // load mediapipe facemesh via TF.js wrapper
+      model = await faceLandmarksDetection.load(faceLandmarksDetection.SupportedPackages.mediapipeFacemesh);
+      statusEl.textContent = 'Model loaded — detecting blinks/winks';
+      return true;
+    } catch(err){
+      showError('Model failed to load. Check network or try again.', err);
+      return false;
+    }
+  }
+
+  // main detection loop
+  async function detectLoop(){
+    running = true;
+    const ctx = canvas.getContext('2d');
+    while(running){
+      try{
+        // estimate single face; flipHorizontal=true so coords match mirrored video for users
+        const faces = await model.estimateFaces({ input: videoEl, returnTensors: false, flipHorizontal: true });
+        if(faces && faces.length){
+          const f = faces[0];
+          // landmarks for eyes: use upper0 + lower0 sets (MediaPipe provides these)
+          const leftEye = (f.annotations.leftEyeUpper0 || []).concat(f.annotations.leftEyeLower0 || []);
+          const rightEye = (f.annotations.rightEyeUpper0 || []).concat(f.annotations.rightEyeLower0 || []);
+          if(leftEye.length && rightEye.length){
+            const L = bbox(leftEye), R = bbox(rightEye);
+            const leftEAR = (L.maxY - L.minY) / (L.maxX - L.minX + 1e-6);
+            const rightEAR = (R.maxY - R.minY) / (R.maxX - R.minX + 1e-6);
+            const leftClosed = leftEAR < EAR_THRESHOLD;
+            const rightClosed = rightEAR < EAR_THRESHOLD;
+
+            // accumulate closing flags while eyes are down
+            if(leftClosed) closingLeft = true;
+            if(rightClosed) closingRight = true;
+
+            // when both reopened after any closing -> register event
+            if(!leftClosed && !rightClosed && (closingLeft || closingRight)){
+              if(closingLeft && closingRight){
+                lastEvent = 'both';
+              } else if(closingLeft){
+                lastEvent = 'left';
+              } else if(closingRight){
+                lastEvent = 'right';
+              } else {
+                lastEvent = 'both';
+              }
+              showEvent(lastEvent);
+              statusEl.textContent = `Detected: ${lastEvent.toUpperCase()}`;
+              // reset trackers
+              closingLeft = closingRight = false;
+            }
+          }
+        } else {
+          statusEl.textContent = 'No face detected — please face the camera';
+        }
+      } catch(err){
+        console.error('Detection error', err);
+        showError('Detection error (see console)', err);
+        // don't crash loop; wait a bit
+      }
+      // frame pacing
+      await new Promise(r => requestAnimationFrame(r));
+    }
+  }
+
+  // Start button handler: camera first, then model, then detection
+  startBtn.addEventListener('click', async () => {
+    errorBox.textContent = '';
+    statusEl.textContent = 'Starting…';
+    startBtn.disabled = true;
+    const stream = await startCameraWithFallback();
+    if(!stream) return; // errors already shown
+    const ok = await loadModelAfterCamera();
+    if(!ok) return;
+    detectLoop();
+  });
+
+  // small keyboard/console helpers for advanced tweaking (dev only)
+  window._blinkDemo = {
+    setEAR: v => { EAR_THRESHOLD = Number(v); console.log('EAR_THRESHOLD set to', EAR_THRESHOLD); },
+    stop: () => { running = false; console.log('Stopped detection'); }
+  };
+
+  // expose initial hint
+  statusEl.textContent = 'Press Start and allow camera. If camera permission previously denied, change via Safari → aA → Website Settings → Camera.';
+})();
+</script>
+</body>
+</html>
