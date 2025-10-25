@@ -3,309 +3,104 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Cristal Rod — Realistic Spectral Behavior</title>
+<title>Cristal Rod — Tuned Behavior</title>
 <style>
   :root{--bg:#0b0b0c;--rod-glow:#9fe1ff;--text:#e6eef6}
-
-  html,body,*{
-    user-select:none;
-    -webkit-user-select:none;
-    -webkit-touch-callout:none;
-    -webkit-user-drag:none;
-  }
-  html,body{
-    height:100%;margin:0;background:var(--bg);
-    overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto;
-  }
-
-  .instructions{
-    position:fixed;top:6px;left:6px;right:6px;
-    z-index:50;color:var(--text);font-size:14px;
-    text-align:center;pointer-events:none
-  }
-
-  #uploadBtn{
-    position:fixed;top:6px;right:6px;
-    z-index:60;text-align:right;
-  }
+  html,body,*{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none}
+  html,body{height:100%;margin:0;background:var(--bg);overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto}
+  .instructions{position:fixed;top:6px;left:6px;right:6px;z-index:50;color:var(--text);font-size:14px;text-align:center;pointer-events:none}
+  #uploadBtn{position:fixed;top:6px;right:6px;z-index:60;text-align:right}
   #fileLabel{font-size:12px;color:#cfe9ff;margin-top:6px}
   input[type=file]{display:none}
-  label.upload-label{
-    display:inline-block;
-    padding:6px 12px;
-    background:#1b1b1d;
-    color:#e6eef6;
-    border:1px solid #555;
-    border-radius:4px;
-    cursor:pointer;
-    font-size:14px;
-  }
-  label.upload-label:hover{background:#2b2b2f;}
-
-  .stage{
-    width:100%;height:100%;
-    display:flex;align-items:center;justify-content:center;
-    position:relative;overflow:hidden;
-  }
-
-  .rod{
-    width:8mm;height:100vh;border-radius:6px;
-    background:linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02));
-    box-shadow:0 8px 30px rgba(0,0,0,0.6),inset 0 0 18px rgba(255,255,255,0.02);
-    display:flex;align-items:center;justify-content:center;
-    transition:box-shadow 120ms,transform 120ms;
-    -webkit-tap-highlight-color:transparent;
-    pointer-events:auto;touch-action:none;
-    position:relative;z-index:10;
-  }
-  .rod.playing{
-    box-shadow:0 10px 40px rgba(0,0,0,0.7),
-               0 0 28px var(--rod-glow),
-               inset 0 0 22px rgba(255,255,255,0.05);
-    transform:scale(1.01);
-  }
-  .rod.glitch{
-    box-shadow:0 10px 40px rgba(0,0,0,0.7),
-               0 0 40px #ff9fa0,
-               inset 0 0 22px rgba(255,255,255,0.05);
-    transform:scale(1.03) rotate(-0.2deg);
-  }
-  .hairline{
-    width:60%;height:2px;
-    background:linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent);
-    border-radius:2px;opacity:0.9;
-  }
-
-  canvas#particles{
-    position:absolute;top:0;left:0;
-    width:100%;height:100%;
-    z-index:1;pointer-events:none;
-  }
+  label.upload-label{display:inline-block;padding:6px 12px;background:#1b1b1d;color:#e6eef6;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:14px}
+  label.upload-label:hover{background:#2b2b2f}
+  .stage{width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+  .rod{width:8mm;height:100vh;border-radius:6px;background:linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02));
+        box-shadow:0 8px 30px rgba(0,0,0,0.6),inset 0 0 18px rgba(255,255,255,0.02);
+        display:flex;align-items:center;justify-content:center;
+        transition:box-shadow 120ms,transform 120ms;-webkit-tap-highlight-color:transparent;pointer-events:auto;touch-action:none;position:relative;z-index:10}
+  .rod.playing{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 28px var(--rod-glow),inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.01)}
+  .rod.glitch{box-shadow:0 10px 40px rgba(0,0,0,0.7),0 0 40px #ff9fa0,inset 0 0 22px rgba(255,255,255,0.05);transform:scale(1.03) rotate(-0.2deg)}
+  .hairline{width:60%;height:2px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent);border-radius:2px;opacity:0.9}
+  canvas#particles{position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;pointer-events:none}
 </style>
 </head>
 <body>
-  <div class="instructions" id="instr">
-    Upload a WAV to play. Touch the rod to start; speed, pressure, and irregularity affect the spectrum.
-  </div>
+<div class="instructions" id="instr">Upload a WAV, then touch the rod to play. Movement & pressure shape the sound.</div>
 
-  <div id="uploadBtn">
-    <label class="upload-label">
-      <input id="fileInput" type="file" accept=".wav,audio/*">
-      <span>Upload WAV</span>
-    </label>
-    <div id="fileLabel"></div>
-  </div>
+<div id="uploadBtn">
+  <label class="upload-label">
+    <input id="fileInput" type="file" accept=".wav,audio/*">
+    <span>Upload WAV</span>
+  </label>
+  <div id="fileLabel"></div>
+</div>
 
-  <div class="stage">
-    <canvas id="particles"></canvas>
-    <div id="rod" class="rod" role="button" aria-label="Glass rod">
-      <div class="hairline"></div>
-    </div>
-  </div>
+<div class="stage">
+  <canvas id="particles"></canvas>
+  <div id="rod" class="rod" role="button"><div class="hairline"></div></div>
+</div>
 
 <script>
-/* ======= CONFIG ======= */
-const SMOOTH_ALPHA = 0.18,
-      MAX_ACCEL = 25,
-      MAX_VELOCITY = 35,
-      PRESSURE_SENSITIVITY = 1.2,
-      STUTTER_RATE_MIN = 6,
-      STUTTER_RATE_MAX = 22,
-      STUTTER_DUTY = 0.5;
-/* ====================== */
-
-let audioCtx=null, buffer=null, src=null,
-    distortion=null, filter=null, chopGain=null, masterGain=null,
-    stutterTimer=null, active=false, lastY=null,
-    lastVelocity=0, velocity=0, acceleration=0, pressure=0,
-    glitching=false;
-
-const rod=document.getElementById('rod'),
-      fileInput=document.getElementById('fileInput'),
-      fileLabel=document.getElementById('fileLabel'),
-      instr=document.getElementById('instr'),
-      canvas=document.getElementById('particles'),
-      ctx=canvas.getContext('2d');
-
-let particles=[];
-
-/* === PARTICLES === */
-function resizeCanvas(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
+const SMOOTH_ALPHA=0.18,MAX_ACCEL=35,MAX_VELOCITY=50,PRESSURE_SENSITIVITY=1.2,
+      STUTTER_RATE_MIN=5,STUTTER_RATE_MAX=18,STUTTER_DUTY=0.5;
+let audioCtx=null,buffer=null,src=null,distortion=null,filter=null,chopGain=null,masterGain=null,stutterTimer=null,
+    active=false,lastY=null,lastVelocity=0,velocity=0,acceleration=0,pressure=0,glitching=false;
+const rod=document.getElementById('rod'),fileInput=document.getElementById('fileInput'),
+      fileLabel=document.getElementById('fileLabel'),instr=document.getElementById('instr'),
+      canvas=document.getElementById('particles'),ctx=canvas.getContext('2d');
+let particles=[];function resizeCanvas(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
 window.addEventListener('resize',resizeCanvas);resizeCanvas();
-
-function spawnParticles(y, accel, press){
-  const accelNorm = Math.min(1, Math.abs(accel)/MAX_ACCEL);
-  const hue = (1-accelNorm)*200 + accelNorm*0; // blue→red
-  const color = `hsl(${hue},100%,60%)`;
-  const count = Math.ceil(2 + 6*accelNorm + 3*press);
-  const rodRect = rod.getBoundingClientRect();
-  for(let i=0;i<count;i++){
-    particles.push({
-      x: rodRect.left+rodRect.width/2+(Math.random()-0.5)*4,
-      y: y+(Math.random()-0.5)*8,
-      vx: (Math.random()-0.5)*(1+3*accelNorm),
-      vy: (Math.random()-0.5)*(2+5*accelNorm),
-      life: 1,
-      color
-    });
-  }
-}
-function updateParticles(dt){
-  particles=particles.filter(p=>p.life>0);
-  for(let p of particles){
-    p.x+=p.vx*dt*60;
-    p.y+=p.vy*dt*60;
-    p.life-=dt*1.2;
-  }
-}
-function drawParticles(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  for(let p of particles){
-    ctx.globalAlpha=Math.max(0,p.life);
-    ctx.fillStyle=p.color;
-    ctx.fillRect(p.x,p.y,2,2);
-  }
-  ctx.globalAlpha=1;
-}
-let lastT=performance.now();
-function animate(t){
-  const dt=(t-lastT)/1000; lastT=t;
-  updateParticles(dt); drawParticles();
-  requestAnimationFrame(animate);
-}
-requestAnimationFrame(animate);
-/* ================== */
-
-function ensureAudioCtx(){
-  if(!audioCtx)
-    audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-}
-
-async function loadFile(file){
-  ensureAudioCtx();
-  const ab=await file.arrayBuffer();
-  buffer=await audioCtx.decodeAudioData(ab);
-  fileLabel.textContent=file.name;
-}
-
-function makeDistortion(amount=0){
-  const ws=audioCtx.createWaveShaper();
-  const k=Math.max(0,Math.min(1000,amount*400));
-  const n=2048, curve=new Float32Array(n);
-  for(let i=0;i<n;i++){
-    const x=(i/(n-1))*2-1;
-    curve[i]=(1+k)*x/(1+k*Math.abs(x));
-  }
-  ws.curve=curve; ws.oversample='2x'; return ws;
-}
-
-function startPlayback(){
-  if(!audioCtx||!buffer)return;
-  distortion=makeDistortion(0);
-  filter=audioCtx.createBiquadFilter(); filter.type='lowpass'; filter.frequency.value=12000; filter.Q.value=0.7;
-  chopGain=audioCtx.createGain(); chopGain.gain.value=1;
-  masterGain=audioCtx.createGain(); masterGain.gain.value=0.9;
-  src=audioCtx.createBufferSource(); src.buffer=buffer; src.loop=true;
-  src.connect(distortion); distortion.connect(filter); filter.connect(chopGain); chopGain.connect(masterGain); masterGain.connect(audioCtx.destination);
-  src.start();
-  rod.classList.add('playing');
-}
-function stopPlayback(){
-  try{ if(src){src.stop(0);src.disconnect();}}catch(e){}
-  src=null;
-  clearStutter();
-  glitching=false; lastY=null; lastVelocity=0;
-  rod.classList.remove('playing'); rod.classList.remove('glitch');
-}
-
-function startStutter(rateHz){
-  clearStutter();
-  if(!chopGain)return;
-  const periodMs=1000/rateHz;
-  let on=true;
-  stutterTimer=setInterval(()=>{
-    on=!on;
-    chopGain.gain.setValueAtTime(on?1:0,audioCtx.currentTime);
-  },periodMs*STUTTER_DUTY);
-}
-function clearStutter(){
-  if(stutterTimer){clearInterval(stutterTimer);stutterTimer=null;}
-  if(chopGain)chopGain.gain.setValueAtTime(1,audioCtx?audioCtx.currentTime:0);
-}
-
-function mapToSpectralParams(velocity, acceleration, pressure){
-  const velNorm=Math.min(1,Math.abs(velocity)/MAX_VELOCITY);
-  const accNorm=Math.min(1,Math.abs(acceleration)/MAX_ACCEL);
-  const brightness=2000+velNorm*10000;
-  const distortionAmt=accNorm;
-  const stutterRate=STUTTER_RATE_MIN+accNorm*(STUTTER_RATE_MAX-STUTTER_RATE_MIN);
-  const amp=0.4+pressure*PRESSURE_SENSITIVITY;
-  return {brightness, distortionAmt, stutterRate, amp};
-}
-
-/* === interaction === */
-function onPointerDown(e){
-  e.preventDefault();
-  ensureAudioCtx();
-  if(audioCtx.state==='suspended')audioCtx.resume();
-  if(!buffer){instr.textContent='Please upload a WAV first.';return;}
-  active=true;
-  const t=e.touches?e.touches[0]:e;
-  lastY=t.clientY; lastVelocity=0;
-  pressure=t.force||0.5;
-  startPlayback();
-}
-
-function onPointerMove(e){
-  if(!active)return;
-  const t=e.touches?e.touches[0]:e;
-  const y=t.clientY, f=t.force||0.5;
-  velocity=y-lastY;
-  acceleration=velocity-lastVelocity;
-  pressure=f;
-
-  const p=mapToSpectralParams(velocity,acceleration,pressure);
-
-  if(filter) filter.frequency.setTargetAtTime(p.brightness*(1-pressure*0.3),audioCtx.currentTime,0.05);
-  if(distortion) distortion.curve=makeDistortion(p.distortionAmt).curve;
-  if(masterGain) masterGain.gain.setTargetAtTime(p.amp,audioCtx.currentTime,0.05);
-  if(Math.abs(acceleration)>3) spawnParticles(y,acceleration,pressure);
-
-  if(Math.abs(acceleration)>5 && !glitching){
-    glitching=true; rod.classList.add('glitch');
-    startStutter(p.stutterRate);
-  } else if(Math.abs(acceleration)<2 && glitching){
-    glitching=false; rod.classList.remove('glitch');
-    clearStutter();
-  }
-
-  lastVelocity=velocity; lastY=y;
-}
-
-function onPointerUp(){active=false;stopPlayback();}
-
-/* === file + drag === */
-fileInput.addEventListener('change',async(ev)=>{
-  if(ev.target.files && ev.target.files[0]) await loadFile(ev.target.files[0]);
-});
+function spawnParticles(y,accel,press){const accelNorm=Math.min(1,Math.abs(accel)/MAX_ACCEL);
+  const hue=(1-accelNorm)*200+accelNorm*0;const color=`hsl(${hue},100%,60%)`;
+  const count=Math.ceil(2+4*accelNorm+2*press);const rodRect=rod.getBoundingClientRect();
+  for(let i=0;i<count;i++){particles.push({x:rodRect.left+rodRect.width/2+(Math.random()-0.5)*4,
+    y:y+(Math.random()-0.5)*8,vx:(Math.random()-0.5)*(1+3*accelNorm),vy:(Math.random()-0.5)*(2+4*accelNorm),
+    life:1,color});}}
+function updateParticles(dt){particles=particles.filter(p=>p.life>0);for(let p of particles){p.x+=p.vx*dt*60;p.y+=p.vy*dt*60;p.life-=dt*1.1;}}
+function drawParticles(){ctx.clearRect(0,0,canvas.width,canvas.height);for(let p of particles){ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,2,2);}ctx.globalAlpha=1;}
+let lastT=performance.now();function animate(t){const dt=(t-lastT)/1000;lastT=t;updateParticles(dt);drawParticles();requestAnimationFrame(animate);}requestAnimationFrame(animate);
+function ensureAudioCtx(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();}
+async function loadFile(file){ensureAudioCtx();const ab=await file.arrayBuffer();buffer=await audioCtx.decodeAudioData(ab);fileLabel.textContent=file.name;}
+function makeDistortion(a=0){const ws=audioCtx.createWaveShaper();const k=Math.max(0,Math.min(1000,a*400));
+  const n=2048,curve=new Float32Array(n);for(let i=0;i<n;i++){const x=(i/(n-1))*2-1;curve[i]=(1+k)*x/(1+k*Math.abs(x));}
+  ws.curve=curve;ws.oversample='2x';return ws;}
+function startPlayback(){if(!audioCtx||!buffer)return;stopPlayback();
+  distortion=makeDistortion(0);filter=audioCtx.createBiquadFilter();filter.type='lowpass';filter.frequency.value=12000;filter.Q.value=0.7;
+  chopGain=audioCtx.createGain();chopGain.gain.value=1;masterGain=audioCtx.createGain();masterGain.gain.value=0.9;
+  src=audioCtx.createBufferSource();src.buffer=buffer;src.loop=true;
+  src.connect(distortion);distortion.connect(filter);filter.connect(chopGain);chopGain.connect(masterGain);masterGain.connect(audioCtx.destination);
+  src.start();rod.classList.add('playing');}
+function stopPlayback(){try{if(src){src.stop(0);src.disconnect();}}catch(e){}src=null;clearStutter();glitching=false;rod.classList.remove('playing');rod.classList.remove('glitch');}
+function startStutter(r){clearStutter();if(!chopGain)return;const pms=1000/r;let on=true;stutterTimer=setInterval(()=>{on=!on;chopGain.gain.setValueAtTime(on?1:0,audioCtx.currentTime);},pms*STUTTER_DUTY);}
+function clearStutter(){if(stutterTimer){clearInterval(stutterTimer);stutterTimer=null;}if(chopGain)chopGain.gain.setValueAtTime(1,audioCtx?audioCtx.currentTime:0);}
+function mapParams(v,a,p){const vn=Math.min(1,Math.abs(v)/MAX_VELOCITY),an=Math.min(1,Math.abs(a)/MAX_ACCEL);
+  const bright=2000+vn*9000,dist=an*0.6,rate=STUTTER_RATE_MIN+an*(STUTTER_RATE_MAX-STUTTER_RATE_MIN),amp=0.4+p*PRESSURE_SENSITIVITY;
+  return{bright,dist,rate,amp};}
+function onDown(e){e.preventDefault();ensureAudioCtx();if(audioCtx.state==='suspended')audioCtx.resume();if(!buffer){instr.textContent='Please upload a WAV first.';return;}
+  active=true;const t=e.touches?e.touches[0]:e;lastY=t.clientY;lastVelocity=0;pressure=t.force||0.5;startPlayback();}
+function onMove(e){if(!active)return;const t=e.touches?e.touches[0]:e;const y=t.clientY,f=t.force||0.5;velocity=y-lastY;acceleration=velocity-lastVelocity;pressure=f;
+  const p=mapParams(velocity,acceleration,pressure);
+  if(filter)filter.frequency.setTargetAtTime(p.bright*(1-pressure*0.3),audioCtx.currentTime,0.05);
+  if(distortion)distortion.curve=makeDistortion(p.dist).curve;
+  if(masterGain)masterGain.gain.setTargetAtTime(p.amp,audioCtx.currentTime,0.05);
+  if(Math.abs(acceleration)>6)spawnParticles(y,acceleration,pressure);
+  if(Math.abs(acceleration)>9&&!glitching){glitching=true;rod.classList.add('glitch');startStutter(p.rate);}
+  else if(Math.abs(acceleration)<4&&glitching){glitching=false;rod.classList.remove('glitch');clearStutter();}
+  lastVelocity=velocity;lastY=y;}
+function onUp(){if(active){active=false;stopPlayback();}}
+fileInput.addEventListener('change',async(ev)=>{if(ev.target.files&&ev.target.files[0])await loadFile(ev.target.files[0]);});
 rod.addEventListener('dragover',e=>{e.preventDefault();rod.style.opacity=0.9;});
 rod.addEventListener('dragleave',()=>rod.style.opacity='');
-rod.addEventListener('drop',async e=>{
-  e.preventDefault();rod.style.opacity='';
-  const f=e.dataTransfer.files[0];
-  if(f) await loadFile(f);
-});
-
-/* === event listeners === */
-rod.addEventListener('touchstart',onPointerDown,{passive:false});
-window.addEventListener('touchmove',onPointerMove,{passive:false});
-window.addEventListener('touchend',onPointerUp,{passive:false});
-window.addEventListener('touchcancel',onPointerUp,{passive:false});
-rod.addEventListener('pointerdown',onPointerDown);
-window.addEventListener('pointermove',onPointerMove);
-window.addEventListener('pointerup',onPointerUp);
-
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&active)onPointerUp();});
+rod.addEventListener('drop',async e=>{e.preventDefault();rod.style.opacity='';const f=e.dataTransfer.files[0];if(f)await loadFile(f);});
+rod.addEventListener('touchstart',onDown,{passive:false});
+window.addEventListener('touchmove',onMove,{passive:false});
+window.addEventListener('touchend',onUp,{passive:false});
+window.addEventListener('touchcancel',onUp,{passive:false});
+rod.addEventListener('pointerdown',onDown);
+window.addEventListener('pointermove',onMove);
+window.addEventListener('pointerup',onUp);
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&active)onUp();});
 </script>
 </body>
 </html>
