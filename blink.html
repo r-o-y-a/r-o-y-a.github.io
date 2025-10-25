@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Blink Squares — Local libs (blink.html)</title>
+<title>Blink Squares — Debug Loader (blink.html)</title>
 <style>
   :root{--bg:#fbfbfb;--muted:#666;--card:#111}
   
@@ -34,7 +34,7 @@ UI,Roboto,Helvetica,Arial;color:#111}
 </head>
 <body>
 <div class="wrap">
-  <h1>Blink Squares — Left / Right / Both</h1>
+  <h1>Blink Squares — Local libs (debug)</h1>
 
   <div class="squares" aria-hidden="true">
     <div id="leftSq" class="sq" aria-label="left">LEFT</div>
@@ -49,60 +49,134 @@ UI,Roboto,Helvetica,Arial;color:#111}
 
   <div id="errorBox" aria-live="polite"></div>
 
-  <p class="note small">This page expects local files under <code>libs/</code> (tf + 
-face-landmarks) and <code>libs/mediapipe/</code> (face_mesh JS and wasm files).</p>
+  <p class="note small">This file dynamically checks and loads local libs from 
+<code>libs/</code>. If it stays on "Initializing…" open the browser console to see 
+errors.</p>
 
   <!-- Hidden video + canvas used by the detector -->
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="hiddenCanvas"></canvas>
 </div>
 
-<!-- Local libraries (place these exact files in your repo) -->
-<script src="libs/tf.min.js"></script>
-<script src="libs/face-landmarks-detection.min.js"></script>
-<script src="libs/mediapipe/face_mesh.js"></script>
-
 <script>
-/* blink.html — uses local libs:
-   libs/tf.min.js
-   libs/face-landmarks-detection.min.js
-   libs/mediapipe/face_mesh.js
-   libs/mediapipe/face_mesh_solution_wasm_bin.wasm
-   libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm
-*/
+/* Debug loader + blink detector.
+ * - Dynamically checks presence of local files, loads them, reports precise errors.
+ * - Expects these exact files (place in repo root under 'libs/' and 'libs/mediapipe/'):
+ *   libs/tf.min.js
+ *   libs/face-landmarks-detection.min.js
+ *   libs/mediapipe/face_mesh.js
+ *   libs/mediapipe/face_mesh_solution_wasm_bin.wasm
+ *   libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm
+ *
+ * Overwrites UI status/errorBox with specific messages so you can see what's missing.
+ */
 
-(async function(){
-  const startBtn = document.getElementById('startBtn');
-  const statusEl = document.getElementById('status');
-  const errorBox = document.getElementById('errorBox');
-  const videoEl = document.getElementById('videoEl');
-  const canvas = document.getElementById('hiddenCanvas');
-  const leftSq = document.getElementById('leftSq');
-  const rightSq = document.getElementById('rightSq');
-  const bothSq = document.getElementById('bothSq');
+const REQUIRED = [
+  { url: 'libs/tf.min.js', label: 'TensorFlow (tf.min.js)' },
+  { url: 'libs/face-landmarks-detection.min.js', label: 'face-landmarks-detection UMD' },
+  { url: 'libs/mediapipe/face_mesh.js', label: 'MediaPipe face_mesh.js' },
+  { url: 'libs/mediapipe/face_mesh_solution_wasm_bin.wasm', label: 
+'face_mesh_solution_wasm_bin.wasm' },
+  { url: 'libs/mediapipe/face_mesh_solution_simd_wasm_bin.wasm', label: 
+'face_mesh_solution_simd_wasm_bin.wasm' }
+];
 
-  function setStatus(s){ statusEl.textContent = s; }
-  function setError(s){ errorBox.textContent = s; console.warn(s); }
+const statusEl = document.getElementById('status');
+const errorBox = document.getElementById('errorBox');
+const startBtn = document.getElementById('startBtn');
+const videoEl = document.getElementById('videoEl');
+const canvas = document.getElementById('hiddenCanvas');
+const leftSq = document.getElementById('leftSq');
+const rightSq = document.getElementById('rightSq');
+const bothSq = document.getElementById('bothSq');
 
-  // verify local globals
-  if(!window.tf){ setError('libs/tf.min.js not found or failed to load.'); return; }
-  if(!window.faceLandmarksDetection){ setError('libs/face-landmarks-detection.min.js not 
-found or failed to load.'); return; }
-  if(!window.faceMesh){ /* face_mesh.js creates global faceMesh in some builds; not required 
-but fine */ }
+function setStatus(s){ statusEl.textContent = s; }
+function setError(s){ errorBox.textContent = s; console.warn(s); }
 
-  setStatus('Local libraries detected. Press Start to enable camera.');
-  startBtn.disabled = false;
-
-  // UI colors
+function showEvent(ev){
   const COLORS = { none:'#111', left:'#ff6b6b', right:'#63c2ff', both:'#ffd36b' };
-  function showEvent(ev){
-    leftSq.style.background = ev === 'left' ? COLORS.left : COLORS.none;
-    rightSq.style.background = ev === 'right' ? COLORS.right : COLORS.none;
-    bothSq.style.background = ev === 'both' ? COLORS.both : COLORS.none;
-  }
-  showEvent('none');
+  leftSq.style.background = ev === 'left' ? COLORS.left : COLORS.none;
+  rightSq.style.background = ev === 'right' ? COLORS.right : COLORS.none;
+  bothSq.style.background = ev === 'both' ? COLORS.both : COLORS.none;
+}
+showEvent('none');
 
+// check files with HEAD fetch to get quick status
+async function checkFiles() {
+  setStatus('Checking local files (libs/) …');
+  const missing = [];
+  for (const f of REQUIRED) {
+    try {
+      const res = await fetch(f.url, { method: 'HEAD' });
+      if (!res.ok) missing.push({ file: f.url, status: res.status });
+    } catch (err) {
+      missing.push({ file: f.url, status: err.message });
+    }
+  }
+  return missing;
+}
+
+function loadScriptTag(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = () => resolve(src);
+    s.onerror = (e) => reject(new Error('Failed to load script: ' + src));
+    document.head.appendChild(s);
+  });
+}
+
+(async function init() {
+  try {
+    const missing = await checkFiles();
+    if (missing.length) {
+      const msgs = missing.map(m => `${m.file} → ${m.status}`).join('\n');
+      setError('Missing or unreachable local files:\n' + msgs + '\n\nPlace the files in the 
+exact paths and push to GitHub Pages.');
+      return;
+    }
+
+    setStatus('All files present. Loading local scripts…');
+
+    // Load TF first
+    try {
+      await loadScriptTag('libs/tf.min.js');
+      if (!window.tf) {
+        setError('Loaded libs/tf.min.js but window.tf is not defined. File may be corrupt.');
+        return;
+      }
+    } catch (err) { setError(err.message); return; }
+
+    // Load face-landmarks UMD
+    try {
+      await loadScriptTag('libs/face-landmarks-detection.min.js');
+      if (!window.faceLandmarksDetection) {
+        setError('Loaded face-landmarks script but window.faceLandmarksDetection is not 
+defined.');
+        return;
+      }
+    } catch (err) { setError(err.message); return; }
+
+    // Load mediapipe runtime JS (face_mesh.js)
+    try {
+      await loadScriptTag('libs/mediapipe/face_mesh.js');
+      // face_mesh.js may or may not expose globals; it's OK if not; we just needed it 
+accessible at solutionPath.
+    } catch (err) { setError(err.message); return; }
+
+    setStatus('Libraries loaded locally. Press Start to enable camera.');
+    startBtn.disabled = false;
+
+    // After this point, we wire the blink detection (same logic)
+    wireBlinkDetection();
+
+  } catch (err) {
+    setError('Initialization error: ' + (err && err.message ? err.message : String(err)));
+  }
+})();
+
+function wireBlinkDetection(){
   // parameters & state
   let EAR_THRESHOLD = 0.24;
   const WIDTH_IDEAL = 640, HEIGHT_IDEAL = 480;
@@ -156,17 +230,17 @@ return null;
   async function loadModelAfterCamera(){
     try{
       setStatus('Loading face-landmarks model (MediaPipe facemesh) from local libs …');
-      // Tell the loader where mediapipe assets live.
       model = await 
 faceLandmarksDetection.load(faceLandmarksDetection.SupportedPackages.mediapipeFacemesh, {
         runtime: 'mediapipe',
-        solutionPath: './libs/mediapipe/' // folder containing face_mesh.js and wasm files
+        solutionPath: './libs/mediapipe/' // must contain face_mesh.js and the wasm binaries
       });
       setStatus('Model loaded — detecting blinks/winks');
       return true;
     } catch(err){
       setError('Model failed to load from local libs. Error: ' + (err && err.message ? 
-err.message : String(err)));
+err.message : String(err)) + '\nCheck browser console for network fetch errors to the wasm 
+files.');
       console.error(err);
       return false;
     }
@@ -228,7 +302,7 @@ flipHorizontal: true });
   // debug helpers
   window._blinkDemo = { setEAR: v => { EAR_THRESHOLD = Number(v); console.log('EAR set', 
 EAR_THRESHOLD); }, stop: () => { running = false; } };
-})();
+}
 </script>
 </body>
 </html>
