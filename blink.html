@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Blink Squares — Start Fix (blink.html)</title>
+<title>Blink Squares — Start Fix v2 (blink.html)</title>
 <style>
   :root{--bg:#fbfbfb;--muted:#666}
   
@@ -42,9 +42,7 @@ UI,Roboto,Helvetica,Arial;color:#111}
   </div>
 
   <div class="controls">
-    <!-- button intentionally NOT disabled; uses inline handler to ensure click = user 
-gesture -->
-    <button id="startBtn" onclick="startFlow()">Start camera</button>
+    <button id="startBtn">Start camera</button>
     <div id="status">Click Start. If nothing happens check console or the debug log 
 below.</div>
   </div>
@@ -66,11 +64,10 @@ and the wasm files in <code>libs/mediapipe/</code>.</p>
 <script src="libs/mediapipe/face_mesh.js"></script>
 
 <script>
-/* Start-fix version:
-   - Start button is always active (so click/tap is a direct user gesture).
-   - Reports immediate feedback to UI and debug log.
-   - Loads model AFTER camera start.
-   - Clear, defensive checks for missing scripts.
+/* Robust Start v2:
+   - No inline onclick attributes (avoids ReferenceError race).
+   - startFlow is attached to window and bound to the button via addEventListener.
+   - Clear debug output and defensive checks for missing libs.
 */
 
 const statusEl = document.getElementById('status');
@@ -81,6 +78,7 @@ const rightSq = document.getElementById('rightSq');
 const bothSq = document.getElementById('bothSq');
 const videoEl = document.getElementById('videoEl');
 const canvas = document.getElementById('hiddenCanvas');
+const startBtn = document.getElementById('startBtn');
 
 function logDbg(...args){ const s = args.map(a=> (typeof a === 'object' ? JSON.stringify(a) : 
 String(a))).join(' '); debugLog.textContent += s + '\n'; console.log(...args); }
@@ -104,42 +102,52 @@ let EAR_THRESHOLD = 0.24;
 function bbox(points){ const xs = points.map(p=>p[0]), ys = points.map(p=>p[1]); return 
 {minX:Math.min(...xs), maxX:Math.max(...xs), minY:Math.min(...ys), maxY:Math.max(...ys)}; }
 
-async function startFlow(){
-  // Immediate UI feedback to confirm button worked
+// Expose startFlow globally and also bind after definition
+window.startFlow = async function startFlow(){
+  // immediate UI feedback to show click registered
   setError(''); debugLog.textContent = ''; setStatus('Start pressed — checking libraries and 
 requesting camera...');
 
-  // quick checks
-  if(!window.tf){ setError('ERROR: TensorFlow (tf.min.js) not loaded. Check libs/tf.min.js'); 
-return; }
-  if(!window.faceLandmarksDetection){ setError('ERROR: face-landmarks-detection not loaded. 
-Check libs/face-landmarks-detection.min.js'); return; }
-  logDbg('tf', !!window.tf, 'faceLandmarksDetection', !!window.faceLandmarksDetection);
+  // quick presence checks
+  if(!window.tf){
+    setError('ERROR: TensorFlow (tf.min.js) not loaded. Check libs/tf.min.js is reachable.');
+    return;
+  }
+  if(!window.faceLandmarksDetection){
+    setError('ERROR: face-landmarks-detection not loaded. Check 
+libs/face-landmarks-detection.min.js is reachable.');
+    return;
+  }
+  logDbg('tf present:', !!window.tf, 'faceLandmarksDetection present:', 
+!!window.faceLandmarksDetection);
 
-  // Request camera as the user gesture
+  // request camera as direct user gesture
   try{
     setStatus('Requesting camera (user gesture)…');
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', 
-width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
     videoEl.srcObject = stream;
     await new Promise(r => videoEl.onloadedmetadata = r);
     canvas.width = videoEl.videoWidth || 640; canvas.height = videoEl.videoHeight || 480;
-    setStatus('Camera started — now loading model (after camera)...');
+    setStatus('Camera started — loading model (after camera)…');
   } catch(err){
     setError('Camera error: ' + (err && err.name ? err.name + ' — ' + err.message : 
 String(err)));
     return;
   }
 
-  // Load model AFTER camera start
+  // load model now (point mediapipe assets to local folder)
   try{
-    if(!window.faceLandmarksDetection){ setError('faceLandmarksDetection not available after 
-camera.'); return; }
-    // ensure mediapipe assets are looked up in ./libs/mediapipe/
+    if(!window.faceLandmarksDetection){
+      setError('faceLandmarksDetection not available after camera.');
+      return;
+    }
     model = await 
 faceLandmarksDetection.load(faceLandmarksDetection.SupportedPackages.mediapipeFacemesh, {
       runtime: 'mediapipe',
-      solutionPath: './libs/mediapipe/'
+      solutionPath: './libs/mediapipe/' // must contain face_mesh.js and wasm bins
     });
     setStatus('Model loaded — detecting blinks/winks');
   } catch(err){
@@ -152,10 +160,10 @@ faceLandmarksDetection.load(faceLandmarksDetection.SupportedPackages.mediapipeFa
   // detection loop
   running = true;
   detectLoop();
-}
+};
 
 async function detectLoop(){
-  setStatus('Detecting — show squares when blink/wink happens');
+  setStatus('Detecting — blink/wink will light the squares');
   while(running){
     try{
       const faces = await model.estimateFaces({ input: videoEl, returnTensors: false, 
@@ -184,25 +192,31 @@ flipHorizontal: true });
           }
         }
       } else {
-        // keep last event showing; update status
         setStatus('No face detected — please face the camera');
       }
     } catch(err){
       console.error('Detect error', err);
       setError('Detection error: ' + (err && err.message ? err.message : String(err)));
-      // do not crash; try again next frame
     }
     await new Promise(r => requestAnimationFrame(r));
   }
 }
 
-// expose helper for debugging in console
+// Bind the button AFTER we've declared startFlow
+startBtn.addEventListener('click', () => {
+  // protect against multiple clicks
+  startBtn.disabled = true;
+  // call global startFlow (ensures it's a user gesture)
+  Promise.resolve().then(() => window.startFlow()).catch(err => { setError('Start failed: ' + 
+err); console.error(err); startBtn.disabled = false; });
+});
+
+// small debug helpers
 window._blinkDemo = {
-  startFlow,
+  start: () => window.startFlow(),
   stop: () => { running = false; setStatus('Stopped'); },
   setEAR: v => { EAR_THRESHOLD = Number(v); logDbg('EAR set to', EAR_THRESHOLD); }
 };
 </script>
 </body>
 </html>
-
